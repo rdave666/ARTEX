@@ -1,3 +1,62 @@
+# ARTEX Server for Android
+
+**Run ARTEX on an arm64 Android phone with a signed APK.** No root is required.
+
+[**Download the latest Android APK**](https://github.com/rdave666/artex-android-server/releases/latest/download/app-release.apk)
+· [APK releases and checksums](https://github.com/rdave666/artex-android-server/releases/latest)
+· [Android setup guide](https://github.com/rdave666/artex-android-server#readme)
+
+This repository contains the **engine source used by the Android APK**. The
+native Android app, configuration screen, APK workflow, and release downloads
+are maintained in [artex-android-server](https://github.com/rdave666/artex-android-server).
+
+## What the APK includes
+
+- ARTEX engine, embedded web console, and agent skills.
+- Bundled PostgreSQL, or a connection to your external PostgreSQL database.
+- A foreground service with start/stop controls and startup logs.
+- Official OpenAI configuration and custom OpenAI-compatible URLs/model IDs.
+- Separate custom API keys and an explicit keyless mode for endpoints such as
+  Ollama. Keyless requests send no Authorization header.
+- Private writable storage for JWT/encryption keys, outside Android's read-only
+  executable directory.
+
+The app requires **Android 8.0+ and arm64-v8a**. It does not bundle a paid API
+key or a language model; configure a reachable model endpoint for AI features.
+
+## Install and configure
+
+1. Download `app-release.apk` from the APK release page and install it on the
+   phone. Install over an existing release to preserve app settings and data.
+2. Open **Configuration**. Keep the default database settings for bundled
+   PostgreSQL, or enter an external DSN.
+3. Choose **OpenAI**, or **Custom OpenAI-compatible / Ollama** and supply the
+   API base URL and model ID. Enter its key or enable **No API key**. The
+   endpoint-test button can list models when the server supports `/models`.
+4. Save, start the engine, then open the console at `http://127.0.0.1:8787`.
+   On a fresh database, follow the first-run account setup using the setup
+   token in the engine log.
+
+Ollama's compatible base URL is usually `http://YOUR-SERVER-IP:11434/v1`.
+`localhost` means the phone itself. Stop/start the engine after changing its
+native provider settings. Existing console profiles and explicit per-task or
+agent bindings remain available.
+
+## Engine source and Android integration
+
+The APK build pins an immutable revision of this repository in
+[engine-source.env](https://github.com/rdave666/artex-android-server/blob/main/artex-server/scripts/engine-source.env).
+See [ANDROID.md](ANDROID.md) for writable key storage, keyless endpoint handling,
+and launcher-versus-console configuration precedence.
+
+The engine derives from [BaaRai/ARTEX](https://github.com/BaaRai/ARTEX) and
+[Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX), under [AGPL-3.0](LICENSE).
+The original architecture and non-Android installation documentation is
+preserved below.
+
+<details>
+<summary>Original ARTEX engine documentation, architecture, and server installation</summary>
+
 <div align="center">
 
 <img src="web/public/logo.svg" width="84" alt="ARTEX logo" />
@@ -757,3 +816,6 @@ This project is provided "as is", without any express or implied warranty. The a
 contributors are not liable for any direct or indirect loss, data loss, system damage or legal
 dispute caused by the use of this tool (whether used properly or not). **Downloading, installing or
 using this project means you have read, understood and agreed to all of the above terms.**
+
+
+</details>
