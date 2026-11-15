@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -65,11 +66,12 @@ type Server struct {
 	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
 	// llmProv is the fully-decorated global provider (recorder + failover chain)
 	// installed by applyLLM. Task routers use it after an explicit chain is cleared.
-	llmProv   llm.Provider
-	llmDirect llm.Provider // concrete global provider, before any failover pool
-	llmCfg    agent.Config // current LLM config (key not exposed)
-	llmOn     bool
-	llmProf   string // active LLM profile name (for llmrec tagging)
+	llmProv             llm.Provider
+	llmDirect           llm.Provider // concrete global provider, before any failover pool
+	llmCfg              agent.Config // current LLM config (key not exposed)
+	llmOn               bool
+	launcherLLMOverride atomic.Bool // explicit launcher endpoint is independent of saved global pools
+	llmProf             string      // active LLM profile name (for llmrec tagging)
 
 	// chatBusy guards the per-task main-agent run: the chat handler launches the
 	// agent on the server's background ctx (not the request ctx) and returns
@@ -252,18 +254,16 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		go newNotifier(s).Run(s.ctx)
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
-	// precedence: persisted DB config > env.
-	if cfg, ok := s.loadLLMConfig(); ok {
+	// The Android launcher explicitly opts into env settings; other installs
+	// retain their existing persisted-profile precedence.
+	envOnly := strings.EqualFold(strings.TrimSpace(os.Getenv("ARTEX_LLM_OVERRIDE")), "true")
+	s.launcherLLMOverride.Store(envOnly)
+	cfg, source := selectStartupLLMConfig(envOnly, s.loadLLMConfig, agent.FromEnv)
+	if source != "" {
 		if err := s.applyLLM(cfg); err != nil {
-			log.Printf("[engine] saved LLM config init failed — engine idle: %v", err)
+			log.Printf("[engine] %s LLM config init failed — engine idle: %v", source, err)
 		} else {
-			log.Printf("[engine] LLM configured from DB: %s / %s", cfg.Provider(), cfg.Model)
-		}
-	} else if cfg, ok := agent.FromEnv(); ok {
-		if err := s.applyLLM(cfg); err != nil {
-			log.Printf("[engine] env provider init failed — engine idle: %v", err)
-		} else {
-			log.Printf("[engine] LLM configured from env: %s / %s", cfg.Provider(), cfg.Model)
+			log.Printf("[engine] LLM configured from %s: %s / %s", source, cfg.Provider(), cfg.Model)
 		}
 	} else {
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
@@ -418,6 +418,19 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 // saving or activating a profile takes effect without a restart. Best-effort:
 // logs on failure and leaves the running engine untouched.
 func (s *Server) reapplyActiveProfile() {
+	if s.launcherLLMOverride.Load() {
+		s.cfgMu.Lock()
+		cfg, on := s.llmCfg, s.llmOn
+		s.cfgMu.Unlock()
+		if !on {
+			return
+		}
+		cfg.Retry = resolveRetry(db.RetryOverride{}, s.retryPolicy())
+		if err := s.applyLLM(cfg); err != nil {
+			log.Printf("[engine] launcher LLM refresh failed: %v", err)
+		}
+		return
+	}
 	cfg, ok := s.loadLLMConfig()
 	if !ok {
 		return
@@ -483,8 +496,10 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	// LLM failover pool (default off): wraps the active profile in a failover chain and switches to the next one automatically when the current is unavailable.
 	// It only affects this "global active profile" path — agent-bound / task-pinned ones go through providerForProfile,
 	// still owning that profile exclusively by default (see poolForBinding). When off or with no alternatives, the original provider is returned and behavior is unchanged.
-	if act, err := s.m.pg.ActiveProfile(); err == nil && act != nil {
-		prov = s.poolForActive(act.ID, prov, cfg)
+	if !s.launcherLLMOverride.Load() {
+		if act, err := s.m.pg.ActiveProfile(); err == nil && act != nil {
+			prov = s.poolForActive(act.ID, prov, cfg)
+		}
 	}
 	// No global planner/worker pair: every task runs on its own task-routed pair
 	// (agentsForTask), resolved through the engine's authoritative resolver. Global
@@ -1405,7 +1420,9 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	// Keyless formats (Ollama) need no key; the others keep/require one.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
+		if sameLLMEndpoint(req.Provider, req.BaseURL, s.llmCfg.Provider(), s.llmCfg.BaseURL) {
+			cfg.APIKey = s.llmCfg.APIKey // retain a key only for the endpoint it belongs to
+		}
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
@@ -1421,6 +1438,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "persist provider failed: "+err.Error())
 		return
 	}
+	s.launcherLLMOverride.Store(false) // explicit console reconfiguration takes effect until restart
 	s.invalidateProfileAgents()
 	if _, ok := s.loadLLMConfig(); !ok {
 		writeErr(w, 500, "saved provider is unavailable")

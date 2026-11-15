@@ -2116,8 +2116,9 @@ func (s *Server) pgActivateProfile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.invalidateProfileAgents() // active change may affect pinned-task fallbacks
-	s.reapplyActiveProfile()    // switch the running engine to the newly activated profile
+	s.launcherLLMOverride.Store(false) // an explicit activation overrides the launcher for this process
+	s.invalidateProfileAgents()        // active change may affect pinned-task fallbacks
+	s.reapplyActiveProfile()           // switch the running engine to the newly activated profile
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

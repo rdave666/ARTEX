@@ -76,14 +76,16 @@ func (s *Server) resolveTaskRoleLLM(t *Task, agentKey string) (taskLLMResolution
 		}
 		return s.resolutionFromProfile(p, "task_chain"), nil
 	}
-	p, err := s.m.pg.ActiveProfile()
-	if err != nil {
-		return taskLLMResolution{}, fmt.Errorf("load global LLM profile: %w", err)
-	}
-	if p != nil {
-		resolved := s.resolutionFromProfile(p, "global_profile")
-		if resolved.Available {
-			return resolved, nil
+	if !s.launcherLLMOverride.Load() {
+		p, err := s.m.pg.ActiveProfile()
+		if err != nil {
+			return taskLLMResolution{}, fmt.Errorf("load global LLM profile: %w", err)
+		}
+		if p != nil {
+			resolved := s.resolutionFromProfile(p, "global_profile")
+			if resolved.Available {
+				return resolved, nil
+			}
 		}
 	}
 	s.cfgMu.Lock()

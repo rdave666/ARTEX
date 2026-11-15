@@ -13,6 +13,58 @@ import (
 	"github.com/Autumn-27/artex/db"
 )
 
+func TestSetLLMDoesNotReuseKeyAcrossEndpoints(t *testing.T) {
+	skipWithoutDSN(t)
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	dir := t.TempDir()
+	s := New(ctx, m, dir, dir, dir)
+	defer stopTestServer(t, s, cancel)
+	s.llmCfg = agent.ConfigFrom("openai", "m", "https://saved.example/v1", "fixture-original-key", "")
+	body := bytes.NewBufferString(`{"provider":"openai","model":"m","base_url":"https://different.example/v1","api_key":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/llm", body)
+	rec := httptest.NewRecorder()
+	s.setLLM(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("new endpoint without its own key: HTTP %d", rec.Code)
+	}
+}
+
+func TestSetLLMRetainsKeyForSameEndpoint(t *testing.T) {
+	skipWithoutDSN(t)
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	dir := t.TempDir()
+	s := New(ctx, m, dir, dir, dir)
+	defer stopTestServer(t, s, cancel)
+	s.llmCfg = agent.ConfigFrom("openai", "m", "http://127.0.0.1:1/v1", "fixture-retained-key", "")
+	body := bytes.NewBufferString(`{"provider":"openai","model":"m","base_url":"http://127.0.0.1:1/v1/","api_key":""}`)
+	rec := httptest.NewRecorder()
+	s.setLLM(rec, httptest.NewRequest(http.MethodPost, "/api/llm", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unchanged endpoint: HTTP %d", rec.Code)
+	}
+	profile, err := m.pg.ActiveProfile()
+	if err != nil || profile == nil {
+		t.Fatalf("saved profile unavailable: %v", err)
+	}
+	defer func() {
+		_, _ = m.pg.Exec(`UPDATE llm_profiles SET is_default=false WHERE id=$1`, profile.ID)
+		_ = m.pg.DeleteProfile(profile.ID)
+	}()
+	if profile.APIKey != "fixture-retained-key" {
+		t.Fatal("same endpoint must retain its key")
+	}
+}
+
 func TestSameLLMEndpoint(t *testing.T) {
 	for _, tc := range []struct {
 		provA, baseA, provB, baseB string

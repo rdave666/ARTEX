@@ -60,8 +60,10 @@ func decodeSnapshot(t *testing.T, respHead string, raw []byte) (*evidence.Store,
 
 func TestDecodeEvidenceBodyGzipQuoteFound(t *testing.T) {
 	raw := gzipBody(t, []byte(decodeHTML))
-	if strings.Contains(string(raw), "admin") {
-		t.Fatal("fixture is not compressed")
+	// Valid gzip may contain literal DEFLATE blocks, particularly for short
+	// inputs; the plaintext substring is not evidence of an invalid fixture.
+	if !bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) {
+		t.Fatal("fixture is not gzip")
 	}
 	out, truncated, err := decodeEvidenceBody(decodeGzipHead, raw, verificationReadCap)
 	if err != nil || truncated {

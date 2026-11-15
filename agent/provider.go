@@ -35,7 +35,10 @@ type Config struct {
 	Format  llm.Format
 	BaseURL string
 	APIKey  string
-	Model   string
+	// NoAuth is an explicit keyless Chat Completions endpoint. It never inherits
+	// OPENAI_API_KEY and requires a concrete HTTP(S) base URL.
+	NoAuth bool
+	Model  string
 	// Proxy routes all LLM requests through the given proxy URL (http/https/socks5,
 	// optionally with user:pass@ credentials). Empty means direct — it does NOT
 	// fall back to the standard *_PROXY environment variables.
@@ -168,9 +171,11 @@ func normalizeOllamaBaseURL(raw string) string {
 	return b
 }
 
-// NeedsAPIKey reports whether this provider format requires an API key to be
-// usable. Ollama (local server) is keyless; every cloud format needs one.
-func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
+// NeedsAPIKey reports whether this configuration requires a key. Ollama and
+// explicitly keyless custom Chat Completions endpoints do not.
+func (c Config) NeedsAPIKey() bool {
+	return c.Format != FormatOllama && !(c.NoAuth && c.Format == llm.FormatOpenAI)
+}
 
 // CompactionWindow returns the model context window in TOKENS for compaction
 // thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
@@ -236,6 +241,14 @@ func FromEnv() (Config, bool) {
 	case "openai":
 		c.Format = llm.FormatOpenAI
 		c.APIKey = oaiKey
+		c.BaseURL = strings.TrimRight(strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(c.BaseURL), "/"), "/chat/completions"), "/")
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("ARTEX_LLM_NO_AUTH")), "true") {
+			c.NoAuth = true
+			c.APIKey = ""
+			if !validKeylessEndpoint(c.BaseURL) {
+				return Config{}, false
+			}
+		}
 		if c.Model == "" {
 			c.Model = "gpt-4o"
 		}
@@ -345,6 +358,9 @@ func (c Config) Provider() string {
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
+	if c.NoAuth && (c.Format != llm.FormatOpenAI || !validKeylessEndpoint(c.BaseURL)) {
+		return nil, fmt.Errorf("keyless Chat Completions requires an explicit HTTP(S) base URL without credentials, query, or fragment")
+	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey, c.UserAgent)
 	if err != nil {
 		return nil, err
@@ -352,6 +368,12 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	wireFormat := c.Format
 	baseURL := c.BaseURL
 	apiKey := c.APIKey
+	if c.NoAuth {
+		// Prevent the SDK's environment fallback, then remove this internal token
+		// before the request leaves our transport.
+		apiKey = "artex-keyless"
+		client.Transport = noAuthTransport{base: client.Transport}
+	}
 	// Ollama speaks OpenAI's Chat Completions on the wire. Bundle the keyless
 	// defaults here so an Ollama config can never leak toward the SDK's env-
 	// driven fallbacks: BaseURL to OpenAI's public endpoint, APIKey to
@@ -392,6 +414,19 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		lc.RateLimit = &llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}
 	}
 	return llm.NewProvider(lc)
+}
+
+func validKeylessEndpoint(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+}
+
+type noAuthTransport struct{ base http.RoundTripper }
+
+func (t noAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header.Del("Authorization")
+	return t.base.RoundTrip(clone)
 }
 
 // IsQuotaExhaustedMessage deliberately recognizes only explicit balance,
