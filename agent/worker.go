@@ -292,7 +292,7 @@ func workerTrafficBlock(recording bool) string {
 	if !recording {
 		return ""
 	}
-	return "\n\n**Traffic tools**:\n- traffic_search / traffic_get / traffic_blob: review responses, find already-visited resources — **check the traffic first, don't curl the same URL twice**. traffic_search **requires a host** and by default returns only 3 ultra-light index entries (id/method/url/status/resp_len, no response content) — explicitly raise limit when you need more; body_contains does full-text search in request/response bodies (at least 3 characters; supports substrings and CJK text, e.g. for passwords/keys/errors/internal addresses); to see one entry's raw content use traffic_get(id) — oversized bodies show as @blob sha256:<hash>, fetched in segments with traffic_blob(hash)."
+	return "\n\n**Traffic tools**:\n- traffic_search / traffic_get / traffic_blob / traffic_messages: review responses, find already-visited resources — **check the traffic first, don't curl the same URL twice**. traffic_search **requires a host** and by default returns only 3 ultra-light index entries (id/method/url/status/resp_len, no response content) — explicitly raise limit when you need more; body_contains does full-text search in request/response bodies (at least 3 characters; supports substrings and CJK text, e.g. for passwords/keys/errors/internal addresses); to see one entry's raw content use traffic_get(id) — oversized bodies show as @blob sha256:<hash>, fetched in segments with traffic_blob(hash). WebSocket (status 101) and SSE (text/event-stream) records are captured too: traffic_get shows the handshake, and traffic_messages(id) lists their messages in order with direction and type."
 }
 
 // artifactSpec is section [C]: the code-owned, non-editable tail appended to every
@@ -540,9 +540,12 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	// The session id is the provider-side identity (session header, usage metering)
+	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
+	opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)
+	ctx = transcript.WithSessionID(ctx, opts.SessionID)
 	if w.tx != nil { // persist raw LLM conversation; one file per worked intent
 		opts.Transcript = w.tx
-		opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)
 	}
 	intentID := intent.ID
 	emitWrap := func(r db.Activity) {
@@ -574,7 +577,12 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// restarting from scratch.
 	alreadyRecorded := false
 	if w.tx != nil {
-		_ = s.Resume(opts.SessionID)
+		// A corrupt or unreadable transcript stops the run before any model or tool
+		// call. No terminal reason: the engine marks the intent blocked without the
+		// model_error reruns, which would only fail the same way again.
+		if err := resumeSession(s, opts.SessionID); err != nil {
+			return "", tsx.Writes(), err
+		}
 		alreadyRecorded = requestID != "" && hasWorkerChatMessage(s.Messages(), requestID)
 		if len(s.Messages()) > 0 && message == "" {
 			seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
