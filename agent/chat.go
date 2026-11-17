@@ -108,6 +108,24 @@ type chatVars struct{ DataDir, Now string }
 // tool_use / tool_result / text / result), tagged with the agent key as the
 // worker lane.
 func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message string, maxTurns int, maxDuration time.Duration, webSearch bool, emit func(db.Activity)) (string, error) {
+	return c.chat(ctx, agentKey, sessionID, message, maxTurns, maxDuration, webSearch, emit, false)
+}
+
+// ChatDirect retains the configured model, provider and conversation activity,
+// but sends a plain chat request without agent tool definitions. It is an
+// explicit opt-in for diagnosing Ollama endpoints that handle ordinary chat
+// but fail on agent/tool requests. No automated fallback is attempted because
+// replaying a failed tool-using turn could repeat side effects.
+func (c *ChatAgent) ChatDirect(ctx context.Context, agentKey, sessionID, message string, maxTurns int, maxDuration time.Duration, webSearch bool, emit func(db.Activity)) (string, error) {
+	return c.chat(ctx, agentKey, sessionID, message, maxTurns, maxDuration, webSearch, emit, true)
+}
+
+func (c *ChatAgent) chat(ctx context.Context, agentKey, sessionID, message string, maxTurns int, maxDuration time.Duration, webSearch bool, emit func(db.Activity), direct bool) (string, error) {
+	// Never mix tool-using history with tool-free turns: an assistant tool call
+	// without a matching usable tool can make a later request fail with 400.
+	if direct {
+		sessionID += "-direct"
+	}
 	// gate the global web-search opts by this agent's own flag.
 	ws := c.webSearch
 	if !webSearch {
@@ -165,6 +183,17 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 
 		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
+	}
+	// Norma uses default filesystem/shell tools when Tools is nil. An explicitly
+	// non-nil empty slice is necessary to send NO tool schemas to Ollama.
+	if direct {
+		opts.SystemPrompt = []string{"You are a helpful assistant. Reply directly to the user."}
+		opts.DynamicBoundary = 0
+		opts.Tools = []actool.CoreTool{}
+		opts.DeferredTools = nil
+		opts.UnlockSet = nil
+		opts.Todos = nil
+		opts.EnableWebSearch = false
 	}
 	if c.guard != nil {
 		opts.Hooks = c.guard.Hooks()
