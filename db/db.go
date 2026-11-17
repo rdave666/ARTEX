@@ -264,6 +264,8 @@ var builtinAgents = []builtinAgent{
 	// Auto: built-in "platform operations" agent. Does not join the pentest
 	// orchestration loop; driven from the chat page, operates the platform with tools.
 	{"auto", "Auto", "assistant", "Platform operations assistant: manages tasks (create/view/pause/hint) and assets with tools, and can create/modify skills, custom tools, and MCP.", nil, false, nil},
+	// Lightweight chat deliberately omits tool schemas and agent scaffolding.
+	{"model_chat", "Model chat (no tools)", "assistant", "Lightweight model conversation without tools, skills or platform operations; suitable for small-context Ollama models.", nil, false, nil},
 	// Pentest: built-in "solo pentest" agent. Driven from the chat page, it walks the
 	// full pentest chain alone from recon to wrap-up, planning, executing and
 	// verifying by itself. Interactive shell is on by default.

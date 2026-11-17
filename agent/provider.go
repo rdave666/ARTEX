@@ -23,10 +23,8 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
-	acperm "github.com/Autumn-27/norma/permission"
 	"github.com/Autumn-27/norma/transcript"
 )
 
@@ -655,22 +653,30 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	// effects.
 	ctx = transcript.WithSessionID(ctx, "conntest-"+transcript.NewSessionID())
 	start := time.Now()
-	// MaxTokens must be generous: reasoning models (e.g. deepseek-v4-pro) emit a long
-	// stretch of thinking before answering (measured ~2900 tokens even for a one-word
-	// "ping"). Given only 32, the model stays stuck "thinking" until it hits the
-	// output cap (finish=length) and gets truncated — the connection test still passes
-	// (err=nil) but shows as a messy "interrupted/length/resume". Give it enough
-	// budget to emit OK cleanly (finish=stop).
-	// EscalateMaxTokens stays false: don't raise the cap and retry on truncation, to
-	// avoid burning tokens in a resume loop.
-	reply, err := agentcore.Run(ctx, agentcore.Options{
-		Provider:       prov,
-		SystemPrompt:   []string{"You are a connection test. Just output the two characters OK — no thinking, no explanation, nothing else."},
-		PermissionMode: acperm.ModeBypass,
-		MaxTurns:       1,
-		MaxTokens:      8192,
-		NonStreaming:   !c.Stream, // use this profile's real send/receive mode for the connection test
-	}, "ping")
+	// Test only model connectivity. agentcore.Run installs filesystem/shell and
+	// background tools by default, bloating a ping and even executing unexpected
+	// tool calls. A direct completion matches a lightweight model-chat request.
+	// Respect the profile's output cap; zero leaves the upstream default intact.
+	req := llm.CompletionRequest{
+		System:    []string{"You are a connection test. Just output the two characters OK — no thinking, no explanation, nothing else."},
+		Messages:  []llm.Message{llm.UserText("ping")},
+		MaxTokens: c.MaxTokens,
+	}
+	var msg llm.Message
+	if c.Stream {
+		acc := llm.NewAccumulator()
+		for ev, streamErr := range prov.Stream(ctx, req) {
+			if streamErr != nil {
+				err = streamErr
+				break
+			}
+			acc.Add(ev)
+		}
+		msg = acc.Message()
+	} else {
+		msg, _, _, err = prov.Complete(ctx, req)
+	}
+	reply := msg.Text()
 	lat := time.Since(start)
 	if err != nil {
 		return lat, "", err
