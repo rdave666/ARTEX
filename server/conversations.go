@@ -395,6 +395,7 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		Message     string           `json:"message"`
 		Attachments []chatAttachment `json:"attachments,omitempty"` // files uploaded via method 1 (paths relative to the conversation working dir)
+		Direct      bool             `json:"direct,omitempty"` // bypass agent tools; plain Chat Completions on the selected provider
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -403,6 +404,14 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 	msg := strings.TrimSpace(req.Message)
 	if msg == "" && len(req.Attachments) == 0 {
 		writeErr(w, 400, "Message cannot be empty")
+		return
+	}
+	if req.Direct && len(req.Attachments) != 0 {
+		writeErr(w, 400, "Direct chat cannot read attachments; switch to Agent mode to send files")
+		return
+	}
+	if req.Direct && c.AgentKey == db.FindingRetestAgentKey {
+		writeErr(w, 400, "Finding retest requires agent tools; direct chat is unavailable")
 		return
 	}
 	agentMessage, ok := s.prepareChatMentionMessage(w, msg)
@@ -456,7 +465,7 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 	// conv-<id>/), matching chatUpload's landing dir and agent/chat.go's sessionWorkDir
 	// — busyKey == convBusyKey(c.ID) == "conv-<id>" == that session id.
 	baseDir := filepath.Join(s.m.dir, "sessions", busyKey)
-	s.runConversation(c, composeAgentMessage(agentMessage, req.Attachments, baseDir), busyKey, msg)
+	s.runConversation(c, composeAgentMessage(agentMessage, req.Attachments, baseDir), busyKey, req.Direct, msg)
 	writeJSON(w, 202, map[string]any{"status": "accepted"})
 }
 
@@ -464,14 +473,14 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 // (each conversation is independent → parallel). Steps stream to
 // conversation_activities. Shared by the chat HTTP handler and the P3 scheduler.
 // busyKey clears when the run ends (best-effort in-flight marker).
-func (s *Server) runConversation(c *db.Conversation, msg, busyKey string, userMessage ...string) {
+func (s *Server) runConversation(c *db.Conversation, msg, busyKey string, direct bool, userMessage ...string) {
 	ctx, cancel := s.conversationRunContext(c.ID, busyKey)
 	// Only the human-message handler supplies this field, before adding the
 	// attachment manifest. Scheduler/retest prompts must not be labelled as users.
 	if len(userMessage) == 1 {
 		ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: userMessage[0]})
 	}
-	go s.runConversationTurn(ctx, cancel, c, msg, busyKey)
+	go s.runConversationTurn(ctx, cancel, c, msg, busyKey, direct)
 }
 
 // runConversationSync runs ONE agent turn on a conversation and BLOCKS until the
@@ -480,7 +489,7 @@ func (s *Server) runConversation(c *db.Conversation, msg, busyKey string, userMe
 // for completion before starting the next queued fire for the same agent.
 func (s *Server) runConversationSync(c *db.Conversation, msg, busyKey string) {
 	ctx, cancel := s.conversationRunContext(c.ID, busyKey)
-	s.runConversationTurn(ctx, cancel, c, msg, busyKey)
+	s.runConversationTurn(ctx, cancel, c, msg, busyKey, false)
 }
 
 // Register cancellation before returning 202, so an immediate stop/delete cannot
@@ -495,7 +504,7 @@ func (s *Server) conversationRunContext(id int64, busyKey string) (context.Conte
 	return ctx, cancel
 }
 
-func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelCauseFunc, c *db.Conversation, msg, busyKey string) {
+func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelCauseFunc, c *db.Conversation, msg, busyKey string, direct bool) {
 	defer func() {
 		cancel(agent.AbortChatTurnFinished)
 		s.chatMu.Lock()
@@ -568,11 +577,19 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 		WaitBound: intercept.DefaultTargetWaitBound, Interceptor: s.m.interceptor})
 	// On a manual stop ctx is cancelled; Chat already emits a clean "stopped by the user"
 	// step, so skip the raw-error entry — only surface genuine failures.
-	if _, err := ca.Chat(gctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil {
-		finishReason = err.Error()
+	var chatErr error
+	if direct {
+		// One ordinary completion, without agent schemas or tool execution.
+		// Preserve the normal asynchronous activity flow and its errors.
+		_, chatErr = ca.ChatDirect(gctx, c.AgentKey, sessionID, msg, 1, maxDuration, false, emit)
+	} else {
+		_, chatErr = ca.Chat(gctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit)
+	}
+	if chatErr != nil {
+		finishReason = chatErr.Error()
 		if ctx.Err() == nil {
 			_, _ = pg.AppendConvActivity(c.ID, db.Activity{Worker: c.AgentKey, Kind: "text", IsError: true,
-				Summary: "(error: " + err.Error() + ")", Detail: err.Error()})
+				Summary: "(error: " + chatErr.Error() + ")", Detail: chatErr.Error()})
 		}
 	} else {
 		finishStatus, finishReason = "completed", ""
