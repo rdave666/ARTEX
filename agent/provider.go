@@ -46,7 +46,8 @@ type Config struct {
 	RatePerSecond float64
 	RatePerMinute float64
 	// ContextWindowK is the model's context window in K tokens (user-configured),
-	// used to size compaction thresholds. 0 = default; see CompactionWindow.
+	// used to size compaction thresholds and sent as options.num_ctx to Ollama.
+	// 0 = 32K for Ollama, 200K otherwise; see CompactionWindow.
 	ContextWindowK int
 	// ThinkingType independently controls the thinking "on/off" field (thinking.type):
 	//   "" = don't send (default, compatible with models that don't support the field);
@@ -68,8 +69,8 @@ type Config struct {
 	Stream bool
 	// MaxTokens is the per-reply output cap (tokens). 0 = don't send the field and let
 	// the server default decide (historical behavior). Unlike ContextWindowK, which is
-	// the model's total capacity used only locally to size compaction thresholds and
-	// never sent in a request, this value is sent with every request. Mapped to
+	// the model's total capacity (also sent as num_ctx for Ollama), this value
+	// limits output and is sent with every request. Mapped to
 	// agentcore.Options.MaxTokens.
 	MaxTokens int
 	// MaxTokensField selects which request field carries MaxTokens, only effective for
@@ -132,32 +133,17 @@ const (
 	maxWindowK     = 1000 // cap at 1M tokens (user request)
 )
 
-// FormatOllama marks a LOCAL Ollama server profile. Ollama exposes an
-// OpenAI-compatible Chat Completions endpoint (/v1), so on the wire it speaks
-// llm.FormatOpenAI; the distinct sentinel matters everywhere a profile must be
-// treated as usable WITHOUT an API key — Ollama runs keyless on localhost/LAN.
-// See NeedsAPIKey and NewProvider (which maps it onto FormatOpenAI while
-// forcing our base-URL/key defaults so an empty key never falls back to
-// OpenAI's public endpoint).
+// FormatOllama selects the native Ollama /api/chat adapter, including tool
+// calling and options.num_ctx. OpenAI-only gateways should use format=openai.
 const FormatOllama llm.Format = "ollama"
 
-// DefaultOllamaBaseURL is the base of Ollama's OpenAI-compatible endpoint the
-// provider appends /chat/completions to. Must never end up empty: with an
-// empty BaseURL, the SDK would fall back to OpenAI's public endpoint.
+// DefaultOllamaBaseURL retains the historical /v1 config spelling. The native
+// adapter strips this compatibility suffix before constructing /api/chat.
 const DefaultOllamaBaseURL = "http://127.0.0.1:11434/v1"
 
-// ollamaPlaceholderKey is sent as the Bearer token when no key is configured.
-// Ollama ignores authorization, but a concrete value keeps the SDK from
-// falling back to OPENAI_API_KEY (which would silently ship a real cloud key
-// to the local server) and keeps the header stable.
-const ollamaPlaceholderKey = "ollama"
-
-// normalizeOllamaBaseURL maps whatever the operator typed onto the /v1 root the
-// OpenAI-compatible provider expects: it strips a pasted "/chat/completions"
-// suffix, an empty value becomes the local default, and a missing "/v1" is
-// appended so the natural "http://host:11434" also works. Shared by the saved
-// profile path (ConfigFrom) and the environment path (FromEnv): both used to
-// differ, and only the profile path normalized.
+// normalizeOllamaBaseURL preserves the canonical stored /v1 root used by older
+// profiles and endpoint comparisons. The native adapter accepts this spelling,
+// bare hosts and pasted native endpoints, preserving reverse-proxy prefixes.
 func normalizeOllamaBaseURL(raw string) string {
 	b := strings.TrimRight(strings.TrimSuffix(strings.TrimSpace(raw), "/chat/completions"), "/")
 	if b == "" {
@@ -175,16 +161,22 @@ func (c Config) NeedsAPIKey() bool {
 	return c.Format != FormatOllama && !(c.NoAuth && c.Format == llm.FormatOpenAI)
 }
 
-// CompactionWindow returns the model context window in TOKENS for compaction
-// thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
-// a 200K default; otherwise clamped to [32K, 1M] so compaction stays effective.
+// CompactionWindow returns the total context in tokens. Ollama uses the same
+// value on the wire, so it must not silently clamp a small explicit window up.
+// Other providers retain their historical 200K default and 32K floor.
 func (c Config) CompactionWindow() int {
 	k := c.ContextWindowK
-	if k <= 0 {
-		k = defaultWindowK
-	}
-	if k < minWindowK {
-		k = minWindowK
+	if c.Format == FormatOllama {
+		if k <= 0 {
+			k = 32
+		}
+	} else {
+		if k <= 0 {
+			k = defaultWindowK
+		}
+		if k < minWindowK {
+			k = minWindowK
+		}
 	}
 	if k > maxWindowK {
 		k = maxWindowK
@@ -309,10 +301,8 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		}
 	case "ollama":
 		c.Format = FormatOllama
-		// Ollama's OpenAI-compatible endpoint lives at /v1 and the provider
-		// appends "/chat/completions". Never leave it empty: an empty BaseURL
-		// would let the SDK fall back to OpenAI's public endpoint with this
-		// profile's request.
+		// Retain the canonical stored spelling. The native provider removes
+		// the /v1 suffix and sends /api/chat with the runtime context options.
 		c.BaseURL = normalizeOllamaBaseURL(c.BaseURL)
 		if c.Model == "" {
 			c.Model = "llama3.2"
@@ -363,6 +353,11 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.Format == FormatOllama {
+		return llm.RateLimited(newOllamaProvider(c, client), llm.RateLimit{
+			PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute,
+		}), nil
+	}
 	wireFormat := c.Format
 	baseURL := c.BaseURL
 	apiKey := c.APIKey
@@ -371,20 +366,6 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		// before the request leaves our transport.
 		apiKey = "artex-keyless"
 		client.Transport = noAuthTransport{base: client.Transport}
-	}
-	// Ollama speaks OpenAI's Chat Completions on the wire. Bundle the keyless
-	// defaults here so an Ollama config can never leak toward the SDK's env-
-	// driven fallbacks: BaseURL to OpenAI's public endpoint, APIKey to
-	// OPENAI_API_KEY. A local Ollama ignores the placeholder token; a gateway
-	// that requires one carries a real key in the profile.
-	if wireFormat == FormatOllama {
-		wireFormat = llm.FormatOpenAI
-		if strings.TrimSpace(baseURL) == "" {
-			baseURL = DefaultOllamaBaseURL
-		}
-		if strings.TrimSpace(apiKey) == "" {
-			apiKey = ollamaPlaceholderKey
-		}
 	}
 	lc := llm.Config{
 		Format:     wireFormat,

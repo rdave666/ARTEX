@@ -21,11 +21,12 @@ func TestConnectionIsLightweightAndNeverRunsTools(t *testing.T) {
 					return
 				}
 				if stream {
-					w.Header().Set("Content-Type", "text/event-stream")
-					fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					w.Header().Set("Content-Type", "application/x-ndjson")
+					fmt.Fprintln(w, `{"message":{"role":"assistant","content":"OK"},"done":false}`)
+					fmt.Fprintln(w, `{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}`)
 				} else {
 					w.Header().Set("Content-Type", "application/json")
-					fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`)
+					fmt.Fprint(w, `{"message":{"role":"assistant","content":"OK"},"done":true,"done_reason":"stop"}`)
 				}
 			}))
 			defer upstream.Close()
@@ -39,8 +40,12 @@ func TestConnectionIsLightweightAndNeverRunsTools(t *testing.T) {
 			if tools := body["tools"]; len(tools) > 0 && string(tools) != "[]" {
 				t.Errorf("connection test unexpectedly advertised tools (%d bytes)", len(tools))
 			}
-			if string(body["max_tokens"]) != "128" {
-				t.Errorf("test ignored profile output cap: %s", body["max_tokens"])
+			var options struct {
+				NumPredict int `json:"num_predict"`
+				NumCtx     int `json:"num_ctx"`
+			}
+			if err := json.Unmarshal(body["options"], &options); err != nil || options.NumPredict != 128 || options.NumCtx != 32000 {
+				t.Errorf("test ignored native context/output cap: %s (%v)", body["options"], err)
 			}
 			if len(body["messages"]) > 1024 {
 				t.Errorf("unexpected agent prompt injected: %d bytes", len(body["messages"]))

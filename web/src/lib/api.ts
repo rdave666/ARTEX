@@ -971,6 +971,9 @@ export const api = {
     streaming = true, // test with the profile's real streaming mode so "streaming works, non-streaming does not" never leaks into conversations
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
     user_agent = "", // non-empty = the test overrides the User-Agent header with this value
+    context_window_k?: number,
+    max_tokens?: number,
+    max_tokens_field?: string,
   ) =>
     // reply = the model's actual reply (truncated); the backend marks a profile that replies with nothing as failed
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -985,6 +988,9 @@ export const api = {
       streaming,
       session_header_key,
       user_agent,
+      context_window_k,
+      max_tokens,
+      max_tokens_field,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
