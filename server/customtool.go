@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/guard"
@@ -52,7 +54,7 @@ func (s *Server) pgCreateCustomTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req customToolReq
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -104,7 +106,7 @@ func (s *Server) pgUpdateCustomTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req customToolReq
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -482,7 +484,7 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 		}
 		sessionEnv = tc.Env
 	}
-	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000))
+	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000), s.execPriv)
 	if err != nil {
 		return actool.Errorf(err.Error()), nil
 	}
@@ -492,9 +494,17 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 // execPython writes the code to a temp .py under workDir/.tools, runs it via interp
 // with the params JSON on stdin + scalar params mirrored to TOOL_<NAME> env, and
 // returns combined stdout+stderr (with a timeout/exit note). Standalone + testable.
-func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration) (string, error) {
+// When agent processes run as the executor, the script goes to priv.ScriptDir
+// instead: the executor can write workDir, so it could make workDir/.tools a
+// symlink and have the server, which is root, create and chown a file through it.
+func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration, priv ExecPrivilege) (string, error) {
 	toolsDir := filepath.Join(workDir, ".tools")
-	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+	if priv.Enabled {
+		if priv.ScriptDir == "" {
+			return "", errors.New("the executor script directory is not prepared")
+		}
+		toolsDir = priv.ScriptDir
+	} else if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		return "", err
 	}
 	f, err := os.CreateTemp(toolsDir, key+"-*.py")
@@ -508,17 +518,22 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 		return "", err
 	}
 	f.Close()
+	if err := prepareExecScript(priv, tmp); err != nil {
+		return "", err
+	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
 	c.Dir = workDir
-	c.Env = append(os.Environ(), sessionEnv...) // session proxy env
-	for k, v := range params {                  // scalar params mirrored as TOOL_<NAME>
+	// The allowlist as the executor (execenv_unix.go), then the session proxy env.
+	c.Env = append(agentProcessEnv(priv), sessionEnv...)
+	for k, v := range params { // scalar params mirrored as TOOL_<NAME>
 		if sv, ok := scalarStr(v); ok {
 			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
 		}
 	}
+	applyExecCredential(c, priv) // after c.Env: it sets the executor's HOME there
 	pj, _ := json.Marshal(params)
 	c.Stdin = bytes.NewReader(pj) // parameter JSON goes via stdin
 	out, err := c.CombinedOutput()
@@ -566,6 +581,9 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
 	// Every redirect hop goes through the target gate, as the rendered URL did.
 	client.CheckRedirect = intercept.RedirectCheck(key)
+	if intercept.ApplyAssessmentUserAgent(req) {
+		client.CheckRedirect = assessmentRedirectCheck(client.CheckRedirect)
+	}
 	// The current egress governor paces every request and redirect hop per host
 	// under the noise profile (off by default: the base transport itself). It is
 	// resolved per request, so a changed profile applies to the next call.
@@ -583,6 +601,19 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	out := map[string]any{"status": resp.StatusCode, "body": string(respBody)}
 	b, _ := json.Marshal(out)
 	return actool.Text(actool.Capture(tc, string(b))), nil
+}
+
+// assessmentRedirectCheck sheds the generated identifier on the first redirect
+// to another origin. net/http copies headers from the initial request for each
+// hop, so check the previous hop to keep the identifier off after that point.
+func assessmentRedirectCheck(check func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		previous := via[len(via)-1]
+		if previous.Header.Get("User-Agent") == "" || !config.SameAssessmentOrigin(previous.URL, req.URL) {
+			req.Header.Del("User-Agent")
+		}
+		return check(req, via)
+	}
 }
 
 // httpToolTransport is the transport of one http tool call, or nil
@@ -615,9 +646,11 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	proxyStr := proxyURLString(spec.Proxy)
 	var caFile string
 	if spec.UseRecordingProxy {
-		if addr := proxyURLString(s.m.ProxyAddr()); addr != "" {
+		if tr := s.m.Traffic(); tr != nil && s.m.TrafficEnabled() {
+			proxyStr = proxyURLString(tr.ProxyAddr())
+			caFile = tr.CACertPath()
+		} else if addr := proxyURLString(s.m.GlobalProxy()); addr != "" {
 			proxyStr = addr
-			caFile = s.m.ProxyCACert()
 		}
 	}
 	if proxyStr == "" {
@@ -629,6 +662,8 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	}
 	tr := &http.Transport{Proxy: http.ProxyURL(pu)}
 	if caFile != "" {
+		// Keep recorded HTTP requests on separate connections across redirects.
+		tr.DisableKeepAlives = true
 		if pem, err := os.ReadFile(caFile); err == nil {
 			pool := x509.NewCertPool()
 			if pool.AppendCertsFromPEM(pem) {

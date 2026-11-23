@@ -248,6 +248,7 @@ func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	if err != nil {
 		return
 	}
+	intercept.ApplyAssessmentUserAgent(req)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return
@@ -279,20 +280,6 @@ func hostOf(rawURL string) string {
 		return ""
 	}
 	return u.Hostname()
-}
-
-func isBlank(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return true
-	case string:
-		return x == ""
-	case float64:
-		return x == 0
-	case int:
-		return x == 0
-	}
-	return false
 }
 
 func uniq(in []string) []string {

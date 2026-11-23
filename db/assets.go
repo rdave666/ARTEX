@@ -165,7 +165,7 @@ func calcCSegment(ipStr string) string {
 func normalizeURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return raw
+		return stripURLUserinfo(raw)
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
 	u.Host = strings.ToLower(u.Host)
@@ -175,6 +175,25 @@ func normalizeURL(raw string) string {
 		s = strings.TrimSuffix(s, "/")
 	}
 	return s
+}
+
+// stripURLUserinfo removes scheme://userinfo@ when url.Parse cannot. The
+// userinfo is the span before the last @ that still sits in the authority.
+func stripURLUserinfo(raw string) string {
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return raw
+	}
+	rest := raw[i+3:]
+	authEnd := len(rest)
+	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+		authEnd = j
+	}
+	at := strings.LastIndex(rest[:authEnd], "@")
+	if at < 0 {
+		return raw
+	}
+	return raw[:i+3] + rest[at+1:]
 }
 
 // parseURL extracts domain, port, service_name from a URL.
@@ -221,7 +240,9 @@ func marshalStringArray(items []string) string {
 	}
 	escaped := make([]string, len(items))
 	for i, s := range items {
-		escaped[i] = `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		escaped[i] = `"` + s + `"`
 	}
 	return "{" + strings.Join(escaped, ",") + "}"
 }
