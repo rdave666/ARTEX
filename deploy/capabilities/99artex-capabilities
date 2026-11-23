@@ -1,0 +1,2 @@
+// Run asynchronously; an inventory refresh failure must not fail a package transaction.
+DPkg::Post-Invoke { "/usr/bin/systemctl --no-block start artex-capabilities-refresh.service >/dev/null 2>&1 || true"; };

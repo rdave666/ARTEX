@@ -1,0 +1,14 @@
+[Unit]
+Description=ARTEX dedicated Tailscale ingress guard
+Before=artex.service
+After=ufw.service nftables.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/sbin/nft delete table inet artex
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/artex.nft
+RemainAfterExit=yes
+# Retain the restrictive rule when stopped. Remove explicitly during uninstall.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh curated ARTEX Kali command awareness (local help/version only)
+After=artex.service postgresql@18-artex.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/artex/capabilities/refresh.py
+TimeoutStartSec=10min
+NoNewPrivileges=true
+UMask=0022

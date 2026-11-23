@@ -1,0 +1,272 @@
+[
+  {
+    "name": "nmap",
+    "args": [
+      "--version"
+    ],
+    "category": "network",
+    "purpose": "Network ports and service discovery; scan mode privileges vary."
+  },
+  {
+    "name": "nuclei",
+    "args": [
+      "-version"
+    ],
+    "category": "web",
+    "purpose": "Template-driven vulnerability checks; templates require separate readiness."
+  },
+  {
+    "name": "httpx",
+    "args": [
+      "-version"
+    ],
+    "category": "web",
+    "purpose": "ProjectDiscovery HTTP probing, not the Python HTTPX client."
+  },
+  {
+    "name": "subfinder",
+    "args": [
+      "-version"
+    ],
+    "category": "recon",
+    "purpose": "Passive subdomain discovery; some providers need keys."
+  },
+  {
+    "name": "katana",
+    "args": [
+      "-version"
+    ],
+    "category": "web",
+    "purpose": "Web crawling and endpoint discovery."
+  },
+  {
+    "name": "dalfox",
+    "args": [
+      "--version"
+    ],
+    "category": "web",
+    "purpose": "XSS testing; v3 syntax: inspect --help before use."
+  },
+  {
+    "name": "sqlmap",
+    "args": [
+      "--version"
+    ],
+    "category": "web",
+    "purpose": "SQL injection assessment; verify task constraints before active use."
+  },
+  {
+    "name": "ffuf",
+    "args": [
+      "-V"
+    ],
+    "category": "web",
+    "purpose": "HTTP fuzzing; needs a task-specific wordlist and rate limits."
+  },
+  {
+    "name": "bbot",
+    "args": [
+      "--version"
+    ],
+    "category": "recon",
+    "purpose": "Event-driven recon; load bbot-recon for prepared module subsets; use --no-deps."
+  },
+  {
+    "name": "playwright-cli",
+    "args": [
+      "--version"
+    ],
+    "category": "browser",
+    "purpose": "Browser automation; use existing Chrome, no browser download required."
+  },
+  {
+    "name": "nxc",
+    "args": [
+      "--help"
+    ],
+    "category": "ad",
+    "purpose": "NetExec network/AD assessment; credentials and protocols are task-dependent."
+  },
+  {
+    "name": "bloodhound-python",
+    "args": [
+      "--help"
+    ],
+    "category": "ad",
+    "purpose": "AD collection; requires reachable domain services and appropriate credentials."
+  },
+  {
+    "name": "impacket-GetUserSPNs",
+    "args": [
+      "-h"
+    ],
+    "category": "ad",
+    "purpose": "Kerberos SPN assessment; needs domain inputs and task-specific authentication."
+  },
+  {
+    "name": "impacket-secretsdump",
+    "args": [
+      "-h"
+    ],
+    "category": "ad",
+    "purpose": "Credential extraction workflows; sensitive operation requiring explicit task scope."
+  },
+  {
+    "name": "certipy-ad",
+    "args": [
+      "-h"
+    ],
+    "category": "ad",
+    "purpose": "AD certificate services assessment; Kali command name is certipy-ad."
+  },
+  {
+    "name": "smbclient",
+    "args": [
+      "--version"
+    ],
+    "category": "ad",
+    "purpose": "SMB access and enumeration; authentication may be required."
+  },
+  {
+    "name": "rpcclient",
+    "args": [
+      "--version"
+    ],
+    "category": "ad",
+    "purpose": "Windows RPC enumeration; requires a task-approved server."
+  },
+  {
+    "name": "ldapsearch",
+    "args": [
+      "-VV"
+    ],
+    "accept_codes": [
+      0,
+      1
+    ],
+    "category": "ad",
+    "purpose": "LDAP queries; server, authentication and TLS are task-dependent."
+  },
+  {
+    "name": "enum4linux-ng",
+    "args": [
+      "--help"
+    ],
+    "category": "ad",
+    "purpose": "SMB/Windows enumeration."
+  },
+  {
+    "name": "r2",
+    "args": [
+      "-v"
+    ],
+    "category": "binary",
+    "purpose": "Binary analysis; load relevant reverse-engineering skill."
+  },
+  {
+    "name": "gdb",
+    "args": [
+      "--version"
+    ],
+    "category": "binary",
+    "purpose": "Debugging; ptrace/attach privileges may be restricted."
+  },
+  {
+    "name": "tshark",
+    "args": [
+      "--version"
+    ],
+    "category": "network",
+    "purpose": "Packet analysis; offline files preferred, live capture privileges separate."
+  },
+  {
+    "name": "tcpdump",
+    "args": [
+      "--version"
+    ],
+    "category": "network",
+    "purpose": "Packet capture/readback; live capture privileges require verification."
+  },
+  {
+    "name": "masscan",
+    "args": [
+      "--version"
+    ],
+    "category": "network",
+    "purpose": "High-rate port scanning; raw-socket privileges and strict rate/scope limits required.",
+    "accept_codes": [
+      0,
+      1
+    ],
+    "expect": "Masscan version"
+  },
+  {
+    "name": "gobuster",
+    "args": [
+      "--help"
+    ],
+    "category": "web",
+    "purpose": "Content/DNS discovery; requires a suitable wordlist."
+  },
+  {
+    "name": "feroxbuster",
+    "args": [
+      "--version"
+    ],
+    "category": "web",
+    "purpose": "Recursive content discovery; control depth, rate and scope."
+  },
+  {
+    "name": "hydra",
+    "args": [
+      "-h"
+    ],
+    "category": "ad",
+    "purpose": "Authentication testing; check account lockout and rate constraints first.",
+    "accept_codes": [
+      0,
+      255
+    ],
+    "expect": "Syntax: hydra"
+  },
+  {
+    "name": "nikto",
+    "args": [
+      "-Version"
+    ],
+    "category": "web",
+    "purpose": "Web-server checks; active requests require task-approved targets."
+  },
+  {
+    "name": "wafw00f",
+    "args": [
+      "--version"
+    ],
+    "category": "web",
+    "purpose": "Web protection fingerprinting; active HTTP probes."
+  },
+  {
+    "name": "curl",
+    "args": [
+      "--version"
+    ],
+    "category": "core",
+    "purpose": "HTTP/API requests; preserve task proxy and TLS settings."
+  },
+  {
+    "name": "jq",
+    "args": [
+      "--version"
+    ],
+    "category": "core",
+    "purpose": "Local structured JSON filtering."
+  },
+  {
+    "name": "rg",
+    "args": [
+      "--version"
+    ],
+    "category": "core",
+    "purpose": "Local text/source search."
+  }
+]

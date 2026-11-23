@@ -22,6 +22,15 @@ func TestSkillIndexBlock_ListsNamesAndRule(t *testing.T) {
 	}
 }
 
+func TestRoleSkillGuidance(t *testing.T) {
+	if got := RoleSkillGuidance("planner"); !strings.Contains(got, "Delegate technical execution") {
+		t.Fatalf("planner missing capability summary: %q", got)
+	}
+	if got := RoleSkillGuidance("worker"); !strings.Contains(got, "tool availability") {
+		t.Fatalf("worker missing execution guidance: %q", got)
+	}
+}
+
 func TestSkillIndexBlock_Empty(t *testing.T) {
 	if got := SkillIndexBlock(nil); got != "" {
 		t.Fatalf("no skills must render nothing, got %q", got)

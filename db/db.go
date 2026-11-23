@@ -407,9 +407,34 @@ ON CONFLICT DO NOTHING`, r.kind, r.pattern, r.note); err != nil {
 // default — the user turns them on per-agent when needed. scopesentry additionally
 // declares `mcps: ScopeSentry`, which only takes effect once it's made visible and
 // that MCP is enabled/configured.
-var builtinSkillVisibility = map[string][]string{
-	"api-recon": {"auto", "pentest", "worker"},
-}
+var builtinSkillVisibility = func() map[string][]string {
+	m := map[string][]string{
+		"api-recon":   {"auto", "pentest", "worker"},
+		"skill-index": {"goals", "planner", "mainagent", "worker", "auto", "pentest", "reporter", "retester"},
+	}
+	add := func(names string, roles ...string) {
+		for _, name := range strings.Fields(names) {
+			m[name] = roles
+		}
+	}
+	add(`offensive-business-logic offensive-deserialization offensive-file-upload offensive-graphql
+		offensive-idor offensive-open-redirect offensive-parameter-pollution offensive-race-condition
+		offensive-rce offensive-request-smuggling offensive-sqli offensive-ssrf offensive-ssti
+		offensive-waf-bypass offensive-xss offensive-xxe offensive-jwt offensive-oauth`,
+		"worker", "pentest", "auto", "retester")
+	add(`offensive-advanced-redteam offensive-edr-evasion offensive-initial-access
+		offensive-keylogger-arch offensive-shellcode offensive-windows-boundaries
+		offensive-windows-mitigations offensive-network-attacks offensive-data-exfiltration
+		offensive-lateral-movement offensive-persistence offensive-linux-privesc
+		offensive-windows-privesc`, "worker", "pentest", "auto")
+	add(`offensive-basic-exploitation offensive-crash-analysis offensive-exploit-dev-course
+		offensive-exploit-development offensive-mitigations offensive-toctou
+		offensive-bug-identification offensive-fuzzing-course offensive-fuzzing
+		offensive-vuln-classes offensive-fast-checking`, "worker", "pentest", "retester")
+	add(`offensive-osint offensive-osint-methodology`, "goals", "planner", "mainagent", "worker", "auto", "pentest")
+	add(`offensive-reporting`, "planner", "mainagent", "worker", "auto", "pentest", "reporter", "retester")
+	return m
+}()
 
 // seedBuiltinSkillVisibility binds the shipped built-in skills to their default
 // agents. Insert-if-absent (ON CONFLICT DO NOTHING) so a user's later toggle-off is

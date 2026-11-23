@@ -192,7 +192,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 			GlobalNames: globalNames,
 			Unlock:      unlock,
 			UnlockSkill: unlockSkill,
-			SkillIndex:  agent.SkillIndexBlock(skillNames),
+			SkillIndex:  agent.SkillIndexBlock(skillNames) + agent.RoleSkillGuidance(agentKey),
 		}
 		return extra, def, cleanup
 	})

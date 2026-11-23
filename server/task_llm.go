@@ -227,6 +227,14 @@ func (r *taskLLMRuntime) currentFor(ctx context.Context) (taskLLMSelection, erro
 	}
 	if len(pt.LLMProfileIDs) > 0 {
 		if pt.ActiveLLMProfileID == nil {
+			// An exhausted explicit chain remains intact in storage. Operators
+			// may opt its subsequent calls into the global saved-profile pool.
+			if r.s.m.LLMPoolEnabled() && r.s.m.LLMPoolBindFallback() {
+				if prov, cfg, ok := r.s.globalProvider(); ok {
+					sel.provider, sel.retry = prov, cfg.Retry
+					return sel, nil
+				}
+			}
 			return sel, &taskLLMError{taskID: r.taskID, chainExhausted: true, cause: errors.New("all selected profiles are quota exhausted")}
 		}
 		sel.profileID = *pt.ActiveLLMProfileID
@@ -242,8 +250,8 @@ func (r *taskLLMRuntime) currentFor(ctx context.Context) (taskLLMSelection, erro
 		if !ok {
 			return sel, fmt.Errorf("LLM profile #%d is missing or invalid", sel.profileID)
 		}
-		sel.provider, sel.retry = prov, cfg.Retry
-		sel.healthProfileID = sel.profileID // chain selections never go through the Pool
+		sel.provider, sel.retry = r.s.poolForBinding(sel.profileID, prov, cfg), cfg.Retry
+		sel.healthProfileID = healthIDFor(sel.provider, sel.profileID)
 		return sel, nil
 	}
 	prov, cfg, id, ok := r.s.globalProviderWithProfile()
@@ -766,6 +774,8 @@ func (s *Server) taskRuntimeAvailable(t *Task, agentKeys ...string) bool {
 	if len(state.ProfileIDs) > 0 {
 		if state.ActiveID != nil {
 			_, _, unboundReady = s.providerForProfile(*state.ActiveID)
+		} else if s.m.LLMPoolEnabled() && s.m.LLMPoolBindFallback() {
+			_, _, unboundReady = s.globalProvider()
 		}
 	} else {
 		_, _, unboundReady = s.globalProvider()

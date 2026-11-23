@@ -23,7 +23,9 @@ func TestHealthCallbacksStayInStateOrder(t *testing.T) {
 		func(int64, State) { block() },
 		func(int64) { block() },
 	)
-	go reg.Trip(1, "down", true)
+	// A soft failure persists state without opening a cooldown; a later
+	// success must then forget it in callback order.
+	go reg.Trip(1, "down", false)
 	select {
 	case <-firstIn:
 	case <-time.After(2 * time.Second):

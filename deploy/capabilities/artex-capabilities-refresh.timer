@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily fallback refresh for ARTEX Kali capability inventory
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=10min
+Unit=artex-capabilities-refresh.service
+
+[Install]
+WantedBy=timers.target

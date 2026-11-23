@@ -1,0 +1,276 @@
+{
+  "upstream_revision": "6196ba7464662de34e8744d359f175d1a7bca530",
+  "license": "MIT; see Skills/LICENSE-upstream.txt in curated source",
+  "skills": [
+    {
+      "category": "web",
+      "name": "offensive-business-logic",
+      "merged": false,
+      "sha256": "4bd5fbf6bf70f98d0b11583e41d4d778044212df63576b31212edf34542779aa"
+    },
+    {
+      "category": "web",
+      "name": "offensive-deserialization",
+      "merged": false,
+      "sha256": "1152a6d333f53a4427589bf0cc40858caf7e9086adc8cc518a2b98c142702d4c"
+    },
+    {
+      "category": "web",
+      "name": "offensive-file-upload",
+      "merged": false,
+      "sha256": "1c5b634b01ca758ae36ad5b5be21554798d78449692c8781ebc2602bd9a3dbc6"
+    },
+    {
+      "category": "web",
+      "name": "offensive-graphql",
+      "merged": false,
+      "sha256": "cf9cbbc8103fe4822c80a7239964dd9c5b3bdd1764003f103522c7d4b6b9f11b"
+    },
+    {
+      "category": "web",
+      "name": "offensive-idor",
+      "merged": false,
+      "sha256": "68487898437a0541ad5002dbed94bdb10869d71cd125df6666cebbcea8d2c2e2"
+    },
+    {
+      "category": "web",
+      "name": "offensive-open-redirect",
+      "merged": false,
+      "sha256": "3ef800f133dd25a5dabc18ce2ce4643f1d3dfd0d73ee2df09fa581c66d8fe735"
+    },
+    {
+      "category": "web",
+      "name": "offensive-parameter-pollution",
+      "merged": false,
+      "sha256": "3ab118c084b8f4c8d093bd4f81dedc8a9b1d4a46ab9e54acae03f16c115dcdf4"
+    },
+    {
+      "category": "web",
+      "name": "offensive-race-condition",
+      "merged": false,
+      "sha256": "34788e370ae6729342c060981a17152f2e34fd74559d0bca5122c54c7d3932b4"
+    },
+    {
+      "category": "web",
+      "name": "offensive-rce",
+      "merged": false,
+      "sha256": "490dd1885e51ee22a7906ea6e258006993493cbe08fe48608afa4cf96abcfcd8"
+    },
+    {
+      "category": "web",
+      "name": "offensive-request-smuggling",
+      "merged": false,
+      "sha256": "18b958bb71aeb420c28190090382e93d62f31df0a08eed42470d38ad1e21a674"
+    },
+    {
+      "category": "web",
+      "name": "offensive-sqli",
+      "merged": false,
+      "sha256": "e9f37270d2cf9093ebec8cee29a12040133078aca7407570fd715f6e7649cb37"
+    },
+    {
+      "category": "web",
+      "name": "offensive-ssrf",
+      "merged": false,
+      "sha256": "29e263058e353f5039987c792bf08e95d66303d18d36e9c0fc7c79e94f8c4918"
+    },
+    {
+      "category": "web",
+      "name": "offensive-ssti",
+      "merged": false,
+      "sha256": "ce6013194dbe9a5fca129142a46f55cc74974f855992b33bb3057cc6ccbd6d58"
+    },
+    {
+      "category": "web",
+      "name": "offensive-waf-bypass",
+      "merged": false,
+      "sha256": "2915360fcf93b953b02fab6339dee414bbd6b99c359ea3cdbc74fe3820c4ad58"
+    },
+    {
+      "category": "web",
+      "name": "offensive-xss",
+      "merged": false,
+      "sha256": "1001635a2d06ace58a9813caf5be7fc106be18f7943516c2a3cda4c12e3b1042"
+    },
+    {
+      "category": "web",
+      "name": "offensive-xxe",
+      "merged": false,
+      "sha256": "d21972100681e4bee483c0f37534f69a8bb8c4b5cbd5a6e0ce9e45975af4094b"
+    },
+    {
+      "category": "auth",
+      "name": "offensive-jwt",
+      "merged": false,
+      "sha256": "3433b8aeb716ca190835fecec9a1e14400dea59be42e18e803815d0b80160779"
+    },
+    {
+      "category": "auth",
+      "name": "offensive-oauth",
+      "merged": false,
+      "sha256": "e539c7770d32cbc99a57b0b6aab44ac7bd3bb705c85f6e90a1cae74676c13296"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-advanced-redteam",
+      "merged": true,
+      "sha256": "d5e1d178728c68971727e3e64c774cbe3a4506c68c3d134ced4d1c891fc9a1f8"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-edr-evasion",
+      "merged": false,
+      "sha256": "b56d7d659ad18be81824c4e0c85089c04fc6ebebf96328b3051b41427328ed4a"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-initial-access",
+      "merged": false,
+      "sha256": "9a727e48aa19eeac02c80cdacc7433cad49734c22d7ed2346f546490acadc986"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-keylogger-arch",
+      "merged": false,
+      "sha256": "c829736300521fe7bdb0e561326d7a36377bb6dd63bbab1ac17cb7631b9d9ac8"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-shellcode",
+      "merged": false,
+      "sha256": "3f6399baf95a1e41c6968ed8b69fcb0989019ae79420298058da48cab3e09a68"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-windows-boundaries",
+      "merged": false,
+      "sha256": "9e452bc7a9385fd5938f425c3706d569083f7881d9aca571b74056be24d5af92"
+    },
+    {
+      "category": "infrastructure",
+      "name": "offensive-windows-mitigations",
+      "merged": false,
+      "sha256": "f19ba8614c44daa865d23db416f78f94077e9767cff286487bb8bcba98dc60d1"
+    },
+    {
+      "category": "exploit-dev",
+      "name": "offensive-basic-exploitation",
+      "merged": false,
+      "sha256": "1d4724961e5ef19dcb5177e1628d50ca9c2f9e63f9f2c9581ff8fda1c9d8081e"
+    },
+    {
+      "category": "exploit-dev",
+      "name": "offensive-crash-analysis",
+      "merged": false,
+      "sha256": "4be1208ff2cef3180e30d9526bca4a509b679e8fd40ae1834878da4b38240c48"
+    },
+    {
+      "category": "exploit-dev",
+      "name": "offensive-exploit-dev-course",
+      "merged": false,
+      "sha256": "9035e91a797e9bf2934f5628852e388a6df856a83fe4c15ddc94d6dd2e3fbc56"
+    },
+    {
+      "category": "exploit-dev",
+      "name": "offensive-exploit-development",
+      "merged": false,
+      "sha256": "55ef723ca9807b59fb2f4f8ac28f975e80a5522402141799dfdfa62e22983d89"
+    },
+    {
+      "category": "exploit-dev",
+      "name": "offensive-mitigations",
+      "merged": false,
+      "sha256": "959b095447671b9eafdc152ef2b127c907d164fa45edf57c258e7908e59adbdf"
+    },
+    {
+      "category": "exploit-dev",
+      "name": "offensive-toctou",
+      "merged": false,
+      "sha256": "8c7fb9790b1853ecf5dfa23fe85b8fa0d1967c20a7ffe04752a6ac4c2253636f"
+    },
+    {
+      "category": "fuzzing",
+      "name": "offensive-bug-identification",
+      "merged": false,
+      "sha256": "7bfc0cb66c65852c305a2eb03f5f5dc42de8c80aefeb4ee1fb3d700f467b9c8d"
+    },
+    {
+      "category": "fuzzing",
+      "name": "offensive-fuzzing",
+      "merged": false,
+      "sha256": "fcd129b42cdf383cacd7852db336dc51e3e540d872ead9931c7acec30b4088c4"
+    },
+    {
+      "category": "fuzzing",
+      "name": "offensive-fuzzing-course",
+      "merged": false,
+      "sha256": "9b7a49b9db3e8b847d12f33373b952fc22622628355df8e025cf5b73476d88bc"
+    },
+    {
+      "category": "fuzzing",
+      "name": "offensive-vuln-classes",
+      "merged": false,
+      "sha256": "46b677b1f983eabd6f370fd660ffc799f8000ac1ac437de699bd880cc11acbce"
+    },
+    {
+      "category": "recon",
+      "name": "offensive-osint",
+      "merged": false,
+      "sha256": "86199d80683c62dd1f6353d44d332021bd694f28d7ccfc1a9af0a258ee6206c4"
+    },
+    {
+      "category": "recon",
+      "name": "offensive-osint-methodology",
+      "merged": false,
+      "sha256": "d0019a80946ad27f342a49344e0cf9b81e97097dd9d6cc0d468840bcddb6da13"
+    },
+    {
+      "category": "privesc",
+      "name": "offensive-linux-privesc",
+      "merged": true,
+      "sha256": "1007b1e3bbdab4d434a07c95d5a8edf8ef6d4cc1d8ef38a6f45ddbe01657a1ab"
+    },
+    {
+      "category": "privesc",
+      "name": "offensive-windows-privesc",
+      "merged": true,
+      "sha256": "cfb83e47118ed95d406374a5894124a8b3d993da9ca65c0270576b9a32697efe"
+    },
+    {
+      "category": "post-exploitation",
+      "name": "offensive-data-exfiltration",
+      "merged": false,
+      "sha256": "ae48370b98336536e9012d7b3f16ffb8abf745fdd8da78213fa3fd065c9c0534"
+    },
+    {
+      "category": "post-exploitation",
+      "name": "offensive-lateral-movement",
+      "merged": true,
+      "sha256": "dbb18f5cf8381a84afff58d9b196cdd50d9e5b86a0a2099ba41664c2f6a2a7f4"
+    },
+    {
+      "category": "post-exploitation",
+      "name": "offensive-persistence",
+      "merged": false,
+      "sha256": "9b571dd2288f56db193fea2d541053ec95f774375f73feba97f339102c282929"
+    },
+    {
+      "category": "network",
+      "name": "offensive-network-attacks",
+      "merged": false,
+      "sha256": "2053dfa11437d2b47d941eb3238025dc68ba3ce415d14ffb0ea3e545c32673d8"
+    },
+    {
+      "category": "utility",
+      "name": "offensive-fast-checking",
+      "merged": false,
+      "sha256": "c47a6df617f24912224a57c4b677f04cad1fb8bcf12f71eefa233b08809107a5"
+    },
+    {
+      "category": "utility",
+      "name": "offensive-reporting",
+      "merged": true,
+      "sha256": "b9a8bf71828399c75c6c877e0768e4f916adbea352010e2fed06e57f06786200"
+    }
+  ]
+}

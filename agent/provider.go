@@ -30,6 +30,9 @@ import (
 
 // Config describes the LLM backend resolved from the environment.
 type Config struct {
+	// ResponseHeaderTimeout bounds establishment for pool members; zero preserves HTTP defaults.
+	ResponseHeaderTimeout time.Duration
+
 	Format  llm.Format
 	BaseURL string
 	APIKey  string
@@ -385,10 +388,14 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.ResponseHeaderTimeout > 0 {
+		transport := client.Transport.(quotaAwareTransport)
+		transport.base.(*http.Transport).ResponseHeaderTimeout = c.ResponseHeaderTimeout
+	}
 	if c.Format == FormatOllama {
-		return llm.RateLimited(newOllamaProvider(c, client), llm.RateLimit{
+		return withResponseHints(llm.RateLimited(newOllamaProvider(c, client), llm.RateLimit{
 			PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute,
-		}), nil
+		})), nil
 	}
 	wireFormat := c.Format
 	baseURL := c.BaseURL
@@ -435,7 +442,11 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if c.RatePerSecond > 0 || c.RatePerMinute > 0 {
 		lc.RateLimit = &llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}
 	}
-	return llm.NewProvider(lc)
+	provider, err := llm.NewProvider(lc)
+	if err != nil {
+		return nil, err
+	}
+	return withResponseHints(provider), nil
 }
 
 func validKeylessEndpoint(raw string) bool {
@@ -490,9 +501,9 @@ func IsQuotaExhaustedMessage(message string) bool {
 		!strings.Contains(message, "too many requests")
 }
 
-// quotaAwareTransport preserves Norma's normal retry behavior except for a 429
-// whose body explicitly says the account quota/balance is exhausted. Norma's
-// retry loop treats every 429 as transient; normalizing only that response to
+// quotaAwareTransport preserves Norma's normal retry behavior except for a 400
+// or 429 whose body explicitly says the account quota/balance is exhausted.
+// Normalizing only explicit quota failures to
 // 402 lets a task router fail over immediately while retaining the original
 // response body for provider-specific classification and audit logs.
 type quotaAwareTransport struct {
@@ -529,15 +540,16 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 	capt.SetRequest(requestBodySnapshot(req))
 
 	resp, err := t.base.RoundTrip(req)
+	captureResponseHint(req.Context(), resp)
 	if err != nil || resp == nil {
 		return resp, err
 	}
 	// Tee rather than read: a 200 is an SSE stream that must keep streaming. The
-	// 429 branch below reads through this wrapper, so its body lands in the
+	// error branch below reads through this wrapper, so its body lands in the
 	// capture before being replaced.
 	resp.Body = capt.TeeResponse(resp.StatusCode, resp.Body)
 
-	if resp.StatusCode != http.StatusTooManyRequests {
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusBadRequest {
 		return resp, nil
 	}
 	body, readErr := io.ReadAll(resp.Body)
@@ -550,6 +562,7 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if IsQuotaExhaustedMessage(string(body)) {
 		resp.StatusCode = http.StatusPaymentRequired
 		resp.Status = "402 Payment Required"
+		captureResponseHint(req.Context(), resp)
 	}
 	return resp, nil
 }

@@ -101,6 +101,27 @@ const COLLAPSED_AGENTS_KEY = "artex.chat.collapsed-agents";
 // always lands on the empty draft view. A ?c= in the URL takes precedence.
 const LAST_CONVERSATION_KEY = "artex.chat.last-conversation";
 
+// Starters fill the composer without sending anything; the operator can edit
+// target, constraints, and desired outcome before the agent begins.
+const CHAT_STARTERS = [
+  {
+    label: "Red-team assessment",
+    prompt: "Start a red-team assessment of [target]. Objective: [desired outcome]. First inspect available capabilities and relevant skills, check prerequisites, then map the surface, validate one end-to-end path, record evidence and cleanup, and report verified findings and open questions.",
+  },
+  {
+    label: "OSINT investigation",
+    prompt: "Begin an OSINT investigation of [subject]. Focus on [question]. Map sources, note collection dates and provenance, separate confirmed facts from leads, and suggest the most useful next checks.",
+  },
+  {
+    label: "Investigate a finding",
+    prompt: "Investigate finding [ID or description] further. Read its existing evidence and reproduction history, identify what remains unverified, run focused checks, assess impact and negative controls, and update the finding with evidence-linked conclusions.",
+  },
+  {
+    label: "Resume interrupted work",
+    prompt: "Resume the interrupted work on [task or finding]. Read the latest persisted checkpoint, activity, tool results, and pending actions first. Do not repeat verified side effects. Recheck target reachability and prerequisites; if a scan or tool is stalled, diagnose it, retry or choose a bounded fallback, then continue from the last verified step and record the new checkpoint.",
+  },
+] as const;
+
 function conversationIsPinned(conversation: Conversation): boolean {
   return conversation.pinned ?? Boolean(conversation.pinned_at);
 }
@@ -465,6 +486,14 @@ function DraftChat({
           {t('Start a conversation with "{name}"', { name: agent?.name ?? t("Agent") })}
         </div>
         {agent?.description && <p className="text-muted-foreground max-w-md text-xs">{agent.description}</p>}
+        <div className="mt-4 grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
+          {CHAT_STARTERS.map((starter) => (
+            <Button key={starter.label} type="button" variant="outline" className="h-auto min-h-10 justify-start text-left text-xs" onClick={() => setInput(starter.prompt)}>
+              {t(starter.label)}
+            </Button>
+          ))}
+        </div>
+        <p className="text-muted-foreground mt-1 text-xs">{t("Choose a starter to edit it before sending.")}</p>
       </div>
 
       <Composer
@@ -826,6 +855,14 @@ function ChatView({
           )}
         </div>
       </ScrollArea>
+
+      {!running && (
+        <div className="px-3 pb-1">
+          <Button type="button" size="sm" variant="ghost" onClick={() => setInput(CHAT_STARTERS[3].prompt)}>
+            {t("Resume from checkpoint")}
+          </Button>
+        </div>
+      )}
 
       <Composer
         value={input}

@@ -427,3 +427,14 @@ func poolLess(a, b LLMPoolMemberStatus) bool {
 	}
 	return a.Priority > b.Priority
 }
+
+// poolProviderConfig lets the pool choose a different profile rather than
+// repeatedly hitting the same limited/unreachable endpoint. Never changes
+// caller cancellation or idle timeouts after response headers are received.
+func (s *Server) poolProviderConfig(cfg agent.Config) agent.Config {
+	if s.m != nil && s.m.LLMPoolEnabled() {
+		cfg.Retry.ConnectAttempts = -1
+		cfg.ResponseHeaderTimeout = 60 * time.Second
+	}
+	return cfg
+}

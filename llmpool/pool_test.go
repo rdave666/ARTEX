@@ -287,23 +287,6 @@ func TestSkipsMembersTooSmallForRequest(t *testing.T) {
 	}
 }
 
-// Everything tripped: probing the head beats stalling the engine outright.
-func TestAllTrippedStillProbesHead(t *testing.T) {
-	a, b := okProv("a", "a"), okProv("b", "b")
-	reg := NewRegistry(nil, nil)
-	reg.Trip(1, "402", true)
-	reg.Trip(2, "402", true)
-	p := New([]*Member{member(1, "a", 10, a), member(2, "b", 5, b)}, reg)
-
-	got, err := drain(p.Stream(context.Background(), llm.CompletionRequest{}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "a" || a.calls != 1 {
-		t.Fatalf("text=%q a.calls=%d — want the head probed as a last resort", got, a.calls)
-	}
-}
-
 func TestExhaustedChainReportsClearly(t *testing.T) {
 	a, b := failProv("a", 402), failProv("b", 402)
 	p := New([]*Member{member(1, "a", 10, a), member(2, "b", 5, b)}, NewRegistry(nil, nil))

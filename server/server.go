@@ -557,7 +557,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	}
 	if prov == nil {
 		var err error
-		prov, err = cfg.NewProvider()
+		prov, err = s.poolProviderConfig(cfg).NewProvider()
 		if err != nil {
 			return err
 		}
@@ -698,7 +698,7 @@ func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool)
 	if !ok {
 		return nil, agent.Config{}, false
 	}
-	prov, err := cfg.NewProvider()
+	prov, err := s.poolProviderConfig(cfg).NewProvider()
 	if err != nil {
 		log.Printf("[engine] build provider for LLM profile %d failed: %v", id, err)
 		return nil, agent.Config{}, false

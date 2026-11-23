@@ -32,7 +32,7 @@ func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary
 // skillIndexMax bounds the names-only skill index. Skills are meant to be few and
 // short-named; the bound only exists so an agent with a hundred skills cannot push
 // its own instructions out of the prompt.
-const skillIndexMax = 1200
+const skillIndexMax = 2200
 
 // SkillIndexBlock renders the agent's skills as a system-prompt block.
 //
@@ -68,8 +68,24 @@ func SkillIndexBlock(names []string) string {
 	if hidden := len(sorted) - shown; hidden > 0 {
 		tail = fmt.Sprintf(" (+%d more, all listed in the Skill tool)", hidden)
 	}
-	return "\n\n**Skills available to you** — before hunting a class of weakness, invoke the matching skill with the Skill tool (`Skill {\"name\": \"<skill>\"}`) and follow its phases; where the skill and your own plan disagree, the skill wins.\n" +
+	return "\n\n**Skills available to you** — discover capabilities, load the relevant skill with the Skill tool (`Skill {\"name\": \"<skill>\"}`), check prerequisites, execute, then verify results. Use `skill-index` for the categorized catalog when available; adapt skill guidance to the actual task.\n" +
 		b.String() + tail
+}
+
+// RoleSkillGuidance gives coordinators the capability map without loading the
+// technical methodology into every prompt. Execution roles get a short routing
+// reminder; their visible skill names are still listed by SkillIndexBlock.
+func RoleSkillGuidance(agentKey string) string {
+	switch agentKey {
+	case "planner", "goals", "mainagent":
+		return "\nCapability map: web/API and auth/identity; infrastructure, network and privilege escalation; reconnaissance/OSINT; exploit development, fuzzing and vulnerability research; post-exploitation; reporting. Delegate technical execution to worker or pentest with the relevant named skill and prerequisites.\n"
+	case "worker", "pentest", "auto", "retester":
+		return "\nFor technical work, consult the categorized skill-index or a matching named skill, verify tool availability and target context, then record evidence and result.\n"
+	case "reporter":
+		return "\nUse reporting and finding-analysis skills to distinguish observations, validation, impact, and unresolved questions.\n"
+	default:
+		return ""
+	}
 }
 
 // seedUnlockFromHistory replays prior Skill() invocations in the conversation so

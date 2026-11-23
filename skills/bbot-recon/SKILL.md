@@ -1,13 +1,13 @@
 ---
 name: bbot-recon
-description: "Invoke this skill when a hunt task needs breadth-first recon on an authorized target: subdomain enumeration, subdomain-takeover surface, archived URLs, parameter mining, IP/ASN enrichment, or when one-shot tools (subfinder, httpx, nuclei) would need manual piping between steps. Runs bbot (recursive event-graph scanner, installed in the image) under hard program-policy gates: passive zero-touch mode when scanners are banned, active modules only when the program allows them."
+description: "Invoke this skill when a hunt task needs breadth-first recon on an authorized target: subdomain enumeration, subdomain-takeover surface, archived URLs, parameter mining, IP/ASN enrichment, or when one-shot tools (subfinder, httpx, nuclei) would need manual piping between steps. Runs bbot (recursive event-graph scanner, installed natively) under hard program-policy gates: passive zero-touch mode when scanners are banned, active modules only when the program allows them."
 ---
 
 # bbot-recon: recursive recon under program-policy gates
 
 bbot (blacklanternsecurity/bbot, AGPL-3.0 like ARTEX, pinned v3.0.2 at
-`/usr/local/bin/bbot`, venv `/opt/bbot`, module dependencies preinstalled in
-the image) chains every discovery into an event graph and emits structured
+`/usr/local/bin/bbot`, venv `/opt/bbot`, selected module dependencies prepared
+for this native deployment) chains every discovery into an event graph and emits structured
 JSON. Use it for breadth. Keep the single-purpose tools (subfinder, httpx,
 katana, ffuf, nuclei) when you need exact control over individual requests or
 a single host.
@@ -32,9 +32,41 @@ a single host.
    provides a key for a permitted source, pass it via
    `-c modules.<name>.api_key=...` and never echo it.
 5. **Never** run the `kitchen-sink` preset on a live bounty target.
-6. Module deps are preinstalled in the image, so every run passes `--no-deps`.
-   If a module still complains about a dependency, record it as unavailable
-   and continue without it: runtime pip does not work under egress allowlists.
+6. Every run passes `--no-deps`. Only the prepared subset below has been
+   checked on this native deployment; other modules are not assumed ready.
+   If a module complains about a dependency, record it as unavailable and
+   continue without it. Do not install dependencies during target scans.
+
+## Native dependency readiness (2026-11-16)
+
+Prepared passive modules: `crt`, `crt_db`, `certspotter`, `dnsdumpster`,
+`hackertarget`, `anubisdb`, `rapiddns`, `subdomaincenter`, `urlscan`, `wayback`,
+`asn`, `shodan_idb`, `ipneighbor`, `dnscaa`, `dnstlsrpt`, `emailformat`, `pgp`,
+`skymem`. The only added package was `asyncpg==0.32.0` for `crt_db`.
+
+Prepared lightweight active subset: `http`, `dnscommonsrv`, `sslcert`, `robots`,
+`securitytxt`, `oauth`, `graphql_introspection`, `iis_shortnames` (the last
+module still requires the explicit policy allowance described below).
+These are dependency/setup checks, not authorization to run them.
+
+Both subsets passed no-seed/no-target `--dry-run --no-deps` setup in an isolated
+network namespace as the ARTEX service user: 30/30 modules for passive including
+auto-loaded dependencies/internal/outputs, 19/19 for the active subset. No scan
+was started. Passive selection auto-loads `http` in BBOT 3.0.2; do not add target
+scope in Mode P, and retain its default `modules.http.in_scope_only=true`.
+API availability, upstream rate limits and live discovery were not tested.
+
+Do not assume the full Mode A, `baddns-heavy`, or loud families are prepared.
+In particular `baddns*`, `badsecrets`, `fingerprintx`, `gowitness`, `retirejs`,
+`dnsbrute*`, `portscan`, `lightfuzz`, `legba`, and `medusa` dependencies were not
+installed/validated. Existing system tool availability alone does not establish
+BBOT module readiness. No new browser or Go/Rust toolchain was installed for BBOT.
+
+Example prepared passive command (replace target and task id with task scope):
+
+```sh
+bbot -s example.com -m crt crt_db certspotter dnsdumpster hackertarget anubisdb rapiddns subdomaincenter urlscan -om json txt -o /var/lib/artex/data/tasks/<task_id>/bbot -n passive-subdoms -y --no-deps
+```
 
 ## Modes and module sets (v3.0.2, all keyless)
 

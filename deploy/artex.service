@@ -1,0 +1,30 @@
+[Unit]
+Description=ARTEX (native, Tailscale-only UI)
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service postgresql@18-artex.service artex-network.service
+Requires=postgresql@18-artex.service artex-network.service
+
+[Service]
+Type=simple
+User=artex
+Group=artex
+WorkingDirectory=/var/lib/artex
+Environment=ARTEX_CONFIG=/etc/artex/config.json
+Environment=ARTEX_JWT_KEY_DIR=/var/lib/artex/keys
+Environment=ARTEX_SKILL_DIR=/opt/artex/skills
+Environment=HOME=/var/lib/artex
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/artex/artex -addr 100.95.74.28:8787 -proxy 127.0.0.1:8788 -data /var/lib/artex/data
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

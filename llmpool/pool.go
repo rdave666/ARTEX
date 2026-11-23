@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Autumn-27/norma/llm"
@@ -73,31 +74,66 @@ func (p *Pool) Head() *Member { return p.members[0] }
 
 // Stream implements llm.Provider with failover.
 //
-// The one hard rule: a member may only be abandoned BEFORE it has yielded any
-// event. Once text or a tool_use has reached the caller, re-sending the same
-// request to another model would duplicate output and corrupt the conversation
-// history — so a mid-stream failure is surfaced as-is and left to the agent
-// harness's resume logic. Fortunately the failures this exists for (402 no
-// credit, 401 bad key, 429, 5xx) all surface during request establishment,
-// before the body is read, so they always land in the safe window.
+// Only semantic output commits an attempt. Provider metadata is buffered until
+// content arrives, so an error after message_start can still rotate safely.
+// Once text, thinking or a tool call reaches the caller, failover is forbidden.
 func (p *Pool) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-	order := p.order(req)
 	return func(yield func(llm.StreamEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(llm.StreamEvent{}, err)
+			return
+		}
+		order := p.order(req)
 		var lastErr error
 		for i, m := range order {
-			emitted := false
+			if err := ctx.Err(); err != nil {
+				yield(llm.StreamEvent{}, err)
+				return
+			}
+			if p.health.IsOpen(m.ID) {
+				continue
+			}
+			committed := false
+			var pending []llm.StreamEvent
+			flush := func() bool {
+				for _, ev := range pending {
+					if !yield(ev, nil) {
+						return false
+					}
+				}
+				pending = nil
+				return true
+			}
 			var failed error
 			for ev, err := range m.Prov.Stream(ctx, req) {
-				if err != nil && !emitted && shouldFailover(ctx, err) {
-					failed = err
-					break // safe window: nothing reached the caller yet
-				}
-				emitted = true
-				if !yield(ev, err) {
-					return // caller stopped consuming (cancel / early exit)
-				}
 				if err != nil {
-					return // terminal error already handed to the caller
+					if !committed && shouldFailover(ctx, err) {
+						failed = err
+						break
+					}
+					if !flush() {
+						return
+					}
+					yield(ev, err)
+					return
+				}
+				if !committed && !semanticEvent(ev) {
+					// Bound buffering if a broken endpoint emits only metadata.
+					if len(pending) >= 64 {
+						failed = errors.New("LLM stream sent too much metadata before any content")
+						break
+					}
+					pending = append(pending, ev)
+					continue
+				}
+				if !committed {
+					committed = true
+					if !flush() {
+						return
+					}
+				}
+				if !yield(ev, nil) {
+					return
 				}
 			}
 			if failed == nil {
@@ -110,15 +146,26 @@ func (p *Pool) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[
 			}
 			if i+1 < len(order) {
 				n := order[i+1]
-				log.Printf("[llmpool] LLM failover: %q(%s) → %q(%s), reason: %s",
-					m.Name, m.Model, n.Name, n.Model, trimErr(failed))
+				log.Printf("[llmpool] LLM failover: %q(%s) → %q(%s), reason: %s", m.Name, m.Model, n.Name, n.Model, trimErr(failed))
 			}
 		}
 		if lastErr == nil {
 			lastErr = ErrExhausted
 		}
-		log.Printf("[llmpool] failover chain exhausted (all %d profiles failed), last error: %s", len(order), trimErr(lastErr))
 		yield(llm.StreamEvent{}, fmt.Errorf("%w: %v", ErrExhausted, lastErr))
+	}
+}
+
+// Metadata and empty deltas do not expose assistant content. Unknown event
+// types conservatively commit the attempt rather than risk replaying effects.
+func semanticEvent(ev llm.StreamEvent) bool {
+	switch ev.Type {
+	case llm.SEMessageStart, llm.SEMessageDelta, llm.SEMessageStop:
+		return false
+	case llm.SETextDelta, llm.SEThinkingDelta, llm.SEThinkingSignature, llm.SERedactedThinking, llm.SEToolInputJSON, llm.SEToolUseSignature:
+		return ev.Text != ""
+	default:
+		return true
 	}
 }
 
@@ -128,9 +175,18 @@ func (p *Pool) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[
 // tried without risk of duplicated output. Mirrors Stream's health-tripping and
 // chain-exhaustion behavior.
 func (p *Pool) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	if err := ctx.Err(); err != nil {
+		return llm.Message{}, "", llm.Usage{}, err
+	}
 	order := p.order(req)
 	var lastErr error
 	for i, m := range order {
+		if err := ctx.Err(); err != nil {
+			return llm.Message{}, "", llm.Usage{}, err
+		}
+		if p.health.IsOpen(m.ID) {
+			continue
+		}
 		msg, sr, usage, err := m.Prov.Complete(ctx, req)
 		if err == nil {
 			p.health.RecordCall(ctx, m.ID, false, false, nil) // Pass
@@ -162,9 +218,9 @@ func (p *Pool) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Mes
 
 // order picks the members to try, in order: skip those in a cooling-off window
 // and those whose context window can't hold this request, then rotate within each
-// equal-priority group so same-priority profiles share the load. Never returns an
-// empty slice — if everything is filtered out, the head of the chain is tried
-// anyway, since stalling the engine is worse than one more failed request.
+// equal-priority group so same-priority profiles share the load. If all profiles
+// are cooling down or too small, return no candidates instead of violating
+// provider cooldowns or sending a request that is known not to fit.
 func (p *Pool) order(req llm.CompletionRequest) []*Member {
 	est := estimateTokens(req)
 	var open []*Member
@@ -176,9 +232,6 @@ func (p *Pool) order(req llm.CompletionRequest) []*Member {
 			continue // would 400 on length — not a useful failover target
 		}
 		open = append(open, m)
-	}
-	if len(open) == 0 {
-		return p.members[:1] // last resort: probe the head rather than stall
 	}
 	return rotateGroups(open, p.rr.Add(1)-1)
 }
@@ -214,6 +267,10 @@ var statusRe = regexp.MustCompile(`status (\d{3})`)
 
 // statusOf returns the HTTP status carried by err, or 0 if it isn't one.
 func statusOf(err error) int {
+	var status interface{ StatusCode() int }
+	if errors.As(err, &status) {
+		return status.StatusCode()
+	}
 	m := statusRe.FindStringSubmatch(err.Error())
 	if m == nil {
 		return 0
@@ -232,7 +289,7 @@ func shouldFailover(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return false
 	}
 	switch code := statusOf(err); {
@@ -246,6 +303,16 @@ func shouldFailover(ctx context.Context, err error) bool {
 		return true
 	}
 	return false
+}
+
+// retryAfter extracts a provider's Retry-After hint without depending on its
+// concrete error type. Wrapped transport/SDK errors retain the hint.
+func retryAfter(err error) time.Duration {
+	var hint interface{ RetryAfter() time.Duration }
+	if errors.As(err, &hint) {
+		return max(hint.RetryAfter(), 0)
+	}
+	return 0
 }
 
 // isHardFailure reports whether the failure is deterministic (the profile will

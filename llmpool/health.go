@@ -117,12 +117,16 @@ func (r *Registry) Get(id int64) State {
 // IsOpen reports whether a profile is in its cooling-off window.
 func (r *Registry) IsOpen(id int64) bool { return r.Get(id).Open() }
 
-// Pass records a successful call: clears the failure counters so a profile that
-// recovers is fully trusted again (and drops the persisted row).
+// Pass records a successful call after any cooldown has expired. A success
+// already in flight must not erase a newer failure's still-active cooldown.
 func (r *Registry) Pass(id int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	st := r.m[id]
+	// A successful request already in flight must not clear a newer cooldown.
+	if st != nil && time.Now().Before(st.OpenUntil) {
+		return
+	}
 	if st == nil || (st.Fails == 0 && st.Trips == 0 && st.OpenUntil.IsZero()) {
 		return // already clean; nothing to write
 	}
@@ -136,7 +140,14 @@ func (r *Registry) Pass(id int64) {
 // invalid key, missing model) which opens the breaker immediately; hard=false is a
 // transient one (429 / 5xx / network) that needs softTripAfter in a row. Returns
 // true when this call is what opened the breaker, so the caller can log it once.
-func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
+func (r *Registry) Trip(id int64, errMsg string, hard bool) bool {
+	return r.TripWithDelay(id, errMsg, hard, 0)
+}
+
+// TripWithDelay also enforces the provider's minimum Retry-After delay. A
+// positive hint opens immediately, even before the transient failure threshold,
+// and no later failure or in-flight success can shorten that cooling window.
+func (r *Registry) TripWithDelay(id int64, errMsg string, hard bool, minDelay time.Duration) (tripped bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	st := r.m[id]
@@ -148,9 +159,12 @@ func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
 	st.LastError = errMsg
 	st.LastAt = time.Now()
 	softTrip := r.tripAfter()
-	if hard || (softTrip > 0 && st.Fails >= softTrip) {
+	if hard || minDelay > 0 || (softTrip > 0 && st.Fails >= softTrip) {
 		st.Trips++
-		st.OpenUntil = time.Now().Add(r.coolFor(st.Trips))
+		until := time.Now().Add(max(r.coolFor(st.Trips), minDelay))
+		if until.After(st.OpenUntil) {
+			st.OpenUntil = until
+		}
 		st.Fails = 0 // counted into this trip; start fresh for the half-open probe
 		tripped = true
 	}
@@ -198,7 +212,7 @@ func (r *Registry) RecordCall(ctx context.Context, id int64, stream, committed b
 		return false, ""
 	}
 	msg := trimErr(err)
-	return r.Trip(id, msg, isHardFailure(err)), msg
+	return r.TripWithDelay(id, msg, isHardFailure(err), retryAfter(err)), msg
 }
 
 // Reset clears one profile's state — the UI's "Recover now" action.
