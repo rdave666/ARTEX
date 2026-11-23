@@ -49,6 +49,8 @@ var (
 		"The user deleted a running Worker. This call was cancelled; after the Worker exits the write area, the server handles the intent per the user-chosen deletion mode — soft delete only marks it deleted and keeps all outputs, hard delete cascades to remove the intent and the downstream nodes supported only by it")
 	AbortWorkClaimLost = cause("work_claim_lost", "Another Worker took this intent over",
 		"This Worker's claim on the intent expired (no heartbeat reached the database within the claim TTL) and another Worker took the intent over, so its heartbeat was rejected. This run was cancelled and its result is discarded; the intent now belongs to the new claimer")
+	AbortWorkStalled = cause("work_stalled", "Worker made no progress for too long",
+		"The work progress watcher cancelled an unresponsive model or tool call. The intent is blocked and the planner is woken to inspect the persisted trace, verify any uncertain side effects or changed target reachability, and choose whether to resume or take a different route")
 	AbortWorkFinished = cause("work_finished", "Worker finished normally, context freed",
 		"The Worker finished normally, and the engine released its context resources in detachWork. This is not an interruption; if it appears in an interruption message, the cancel and finish events raced")
 	AbortPausedRaceGuard = cause("paused_race_guard", "Refused a new run while task is paused",

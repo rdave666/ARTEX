@@ -5,16 +5,16 @@ description: "Comprehensive red team operations methodology covering full engage
 
 # Advanced Red Team Operations
 
-Use this skill for work that is explicitly authorized and in scope. Preserve evidence, avoid unnecessary impact, and separate verified findings from hypotheses.
+Use this skill for the task's target and objective. Preserve evidence and distinguish verified findings from hypotheses.
 
 ## Workflow
 
-1. Establish the target, authorization boundary, objective, and operational constraints.
+1. Identify the target, objective, and constraints supplied by the task.
 2. Inspect the reference headings and load only the sections needed for the current task.
-3. Adapt commands and payloads to the actual platform, versions, and available tools; do not assume prerequisites.
-4. Prefer the least disruptive method that can answer the testing question.
+3. Adapt commands and payloads to the actual platform, versions, and available tools; check prerequisites.
+4. Select a method that answers the testing question, using a reversible option when it proves the same result.
 5. Record commands, timestamps, evidence, uncertainty, impact, and remediation-relevant observations.
-6. Stop or narrow the approach when scope, ownership, or safety constraints are unclear.
+6. If a tool, target, or assumption changes, diagnose and choose a viable next method rather than silently stopping.
 
 ## Reference
 

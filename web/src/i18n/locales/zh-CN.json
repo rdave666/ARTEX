@@ -2724,5 +2724,11 @@
   "Search company…": "搜索企业…",
   "Failed to load companies": "加载企业失败",
   "No company found": "未找到企业",
-  "Manage companies": "管理企业"
+  "Manage companies": "管理企业",
+  "Red-team assessment": "红队评估",
+  "OSINT investigation": "开源情报调查",
+  "Investigate a finding": "深入调查发现",
+  "Resume interrupted work": "继续中断的工作",
+  "Choose a starter to edit it before sending.": "选择起始提示并在发送前编辑。",
+  "Resume from checkpoint": "从检查点继续"
 }

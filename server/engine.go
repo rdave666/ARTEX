@@ -72,6 +72,7 @@ const (
 	modelErrorRetries      = 2               // extra reruns after a model_error finish
 	modelErrorRetryBackoff = 3 * time.Second // backoff before each retry
 	workControlWaitTimeout = 30 * time.Second
+	workStallIdle          = 10 * time.Minute // no model/tool activity, not merely a live claim heartbeat
 )
 
 var errWorkControlConflict = errors.New("work control conflict")
@@ -1118,6 +1119,33 @@ func startClaimHeartbeat(store *db.ExplorationStore, interval time.Duration, lab
 	return func() { close(quit); <-done }
 }
 
+// startWorkStallWatcher watches actual per-intent activity, not the claim lease:
+// a blocked tool can keep its lease heartbeating indefinitely. Cancellation is
+// bounded and the normal worker settlement path preserves the trace and wakes
+// the planner; the watcher never blindly replays an uncertain side effect.
+func startWorkStallWatcher(ctx context.Context, idle, interval time.Duration, progress *atomic.Int64, cancel context.CancelCauseFunc) (stop func()) {
+	quit, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-quit:
+				return
+			case <-ticker.C:
+				if time.Since(time.Unix(0, progress.Load())) >= idle {
+					cancel(agent.AbortWorkStalled)
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(quit); <-done }
+}
+
 func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 	for {
 		select {
@@ -1218,7 +1246,12 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	hasChatMessage := message != ""
 	e.stampFirstRun(t) // first real execution → stamp first_run_at + compute the deadline (only for tasks with a timeout)
 	e.touch(t.ID)
-	emit := func(r db.Activity) { e.emitActivity(t, r) }
+	progress := new(atomic.Int64)
+	progress.Store(time.Now().UnixNano())
+	emit := func(r db.Activity) {
+		progress.Store(time.Now().UnixNano())
+		e.emitActivity(t, r)
+	}
 	ectx, workCtx, workCancel, ok := e.intentWorkContext(ctx, t)
 	if !ok {
 		if err := t.Store.SettleIntentClaim(intent.ID, token, "open"); err != nil {
@@ -1228,6 +1261,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	e.registerWork(intent.ID, workCancel)
 	stopHeartbeat := startClaimHeartbeat(t.Store, db.IntentClaimHeartbeatInterval, name, intent.ID, token, workCancel)
+	stopStallWatcher := startWorkStallWatcher(workCtx, workStallIdle, db.IntentClaimHeartbeatInterval, progress, workCancel)
 	// wrap the guard hooks so steer_work can inject a mid-run course-correction
 	// for THIS intent (drained before the worker's next tool call).
 	iid := intent.ID
@@ -1283,6 +1317,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		}
 		e.EndLLMCall(t.ID)
 	}
+	stopStallWatcher()
 	stopHeartbeat() // no longer busy: the state writes below follow within the just-renewed claim
 	if meter != nil {
 		meter.Finish() // feeds the per-worker cost estimate
@@ -1336,6 +1371,16 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// write (the fence would reject every write below).
 	if errors.Is(workCause, agent.AbortWorkClaimLost) {
 		log.Printf("[worker %s] task %s intent #%d claim lost to another worker, result discarded", name, t.ID, intent.ID)
+		return true
+	}
+	if errors.Is(workCause, agent.AbortWorkStalled) {
+		if err := t.Store.SettleIntentClaim(intent.ID, token, "blocked"); err != nil {
+			log.Printf("[worker %s] task %s intent #%d stalled settlement failed: %v", name, t.ID, intent.ID, err)
+			return true
+		}
+		log.Printf("[worker %s] task %s intent #%d stalled: trace retained; planner woken for reachability and side-effect check", name, t.ID, intent.ID)
+		e.touch(t.ID)
+		t.NotifyStalled(intent.ID)
 		return true
 	}
 	// if a pause cancelled this run mid-flight, return the intent to the frontier

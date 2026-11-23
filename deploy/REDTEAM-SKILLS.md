@@ -1,5 +1,28 @@
 # Red-team skill import and agent assignments
 
+## 2026-11-23 Claude-Red update
+
+The current native deployment at commit `cb1b891` imports 45 curated
+Claude-Red skills across web, auth, infrastructure, exploit development,
+fuzzing, reconnaissance, privilege escalation, post-exploitation, network,
+and utility. Five overlapping skills retain their prior ARTEX reference and
+include the newer source as a second reference. The MIT notice is at
+`skills/CLAUDE-RED-LICENSE.txt`; per-skill source hashes/categories are in
+`deploy/CLAUDE-RED-IMPORT.json`. The curated clone is stored privately at
+`/home/vlad/.local/share/claude-red-curated` with only `Skills/`, `install.sh`,
+and `convert_skills.py` at its root.
+
+The `skill-index` lists the categories and role routing. Each built-in agent
+has that skill visible, and every run's system prompt lists its own assigned
+skill names with concise discover → load → prerequisites → execute → verify
+guidance. Planner/main receive a capability summary for delegation; execution
+roles receive technical bindings. Existing visibility toggles are preserved
+by insert-if-absent seeding. On the server, the `artex` user loaded 69 skills,
+including three runtime-only prior skills retained by a no-delete sync.
+
+The older assignment table below is the **2026-11-16 baseline**, not the
+current full matrix. Query `agent_skill_visibility` for live bindings.
+
 Imported 13 standalone knowledge packs from Claude Red 0.3.1; original source
 files and reference documents were copied byte-for-byte, without overwriting
 existing packs. Live root: `/opt/artex/skills`; imported checkout copies: `skills/`.

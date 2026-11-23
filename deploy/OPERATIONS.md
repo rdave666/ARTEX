@@ -1,5 +1,29 @@
 # ARTEX native deployment
 
+## 2026-11-23 preservation update
+
+Fork `rdave666/ARTEX` main and this native server were updated to commit
+`cb1b8911c9cc7b78a7570bf753a1baaed24e3198` after a full Go test run,
+static frontend build, isolated database-restore/migration test, and skill
+parser check. Previous binary and skills remain at `/opt/artex/artex.pre-cb1b891`
+and `/opt/artex/skills.pre-cb1b891`; the private database/runtime/Git recovery
+snapshot is under `/home/vlad/.local/share/artex-recovery/2026-11-23`.
+`MEMORY.md` records the operation and subsequent changes. Do not deploy from
+the dirty `/home/vlad/ARTEX` checkout; use the reconciled fork/worktree and
+verify hashes first.
+
+The imported Skill Index and chat starter prompts are live. Runtime-only
+prior skills are preserved by a **no-delete** skill sync. Post-update checks
+showed the UI on the tailnet address, the proxy on loopback, and six synthetic
+non-Tailscale ingress cases blocked by `inet artex`. A remote tailnet peer was
+not available for an end-to-end access test.
+
+The in-progress follow-on work adds a per-intent no-progress watcher. It
+retains activity/transcript checkpoints and wakes the planner to diagnose an
+unresponsive tool or changed target reachability; it must not blindly replay
+an uncertain side effect. Verify and deploy that work separately before
+describing it as live.
+
 Installed 2026-11-16 from `https://github.com/BaaRai/ARTEX`, commit recorded in
 `evidence/commit.txt`. Built from the checkout, no Docker or containers used.
 

@@ -2724,5 +2724,11 @@
   "Search company…": "Şirket ara…",
   "Failed to load companies": "Şirketler yüklenemedi",
   "No company found": "Şirket bulunamadı",
-  "Manage companies": "Şirketleri yönet"
+  "Manage companies": "Şirketleri yönet",
+  "Red-team assessment": "Kırmızı takım değerlendirmesi",
+  "OSINT investigation": "Açık kaynak istihbaratı araştırması",
+  "Investigate a finding": "Bir bulguyu araştır",
+  "Resume interrupted work": "Kesintiye uğrayan çalışmayı sürdür",
+  "Choose a starter to edit it before sending.": "Göndermeden önce düzenlemek için bir başlangıç seçin.",
+  "Resume from checkpoint": "Kontrol noktasından sürdür"
 }

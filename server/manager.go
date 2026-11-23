@@ -2027,6 +2027,16 @@ func (t *Task) NotifyDone(intentID int64) {
 	t.Notify()
 }
 
+// NotifyStalled wakes the planner with a distinct recovery signal. A stalled
+// worker has not completed the intent, so reporting it as an ordinary "done"
+// event would hide the need to inspect an uncertain in-flight tool action.
+func (t *Task) NotifyStalled(intentID int64) {
+	t.trigMu.Lock()
+	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "stalled", IntentID: intentID})
+	t.trigMu.Unlock()
+	t.Notify()
+}
+
 // NotifyFinding records that a worker reported a finding on intentID (summary),
 // then wakes the planner — so the round spells out which intent found what.
 func (t *Task) NotifyFinding(intentID int64, summary string) {

@@ -203,6 +203,8 @@ func plannerGoalAnchor(goal, constraints string) string {
 //	"cancelled" — the human deleted intent IntentID (Detail = the deletion reason).
 //	            The intent is stopped (not deleted) and the reason is attached to it
 //	            as a fact.
+//	"stalled" — the no-progress watcher interrupted a worker. The intent is
+//	            blocked pending planner diagnosis of its checkpoint and target.
 //	"hint"    — one add_hint call added one OR MORE hints (Hints = the hint texts;
 //	            HintOrigin = who wrote them: "human" via the main agent,
 //	            "orchestrator" for cross-task orchestration, otherwise an agent name).
@@ -285,6 +287,9 @@ func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) st
 			}
 			b.WriteString(fmt.Sprintf("\n- Intent #%d was deleted by the user; the deletion reason: %s. The intent has been deleted (no longer executed); please re-plan accordingly.\n%s", ev.IntentID, ev.Detail,
 				env.wrap("intent_summary", sm)))
+		case "stalled":
+			b.WriteString(fmt.Sprintf("\n- The work progress watcher cancelled stalled intent #%d. Its checkpoint and activity trace remain; inspect the last pending tool action and target reachability, then decide whether to resume this intent or choose a different direction. Do not assume the pending action had no side effect.\n%s", ev.IntentID,
+				env.wrap("intent_summary", look.intentSummary(ev.IntentID))))
 		default: // "done"
 			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d finished; output conclusion:\n%s\n%s", ev.IntentID,
 				env.wrap("intent_summary", look.intentSummary(ev.IntentID)), env.wrap("worker_output", look.workerOutput(ev.IntentID))))
