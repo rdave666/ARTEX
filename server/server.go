@@ -1456,17 +1456,20 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider         string `json:"provider"`
-		Model            string `json:"model"`
-		BaseURL          string `json:"base_url"`
-		Proxy            string `json:"proxy"`
-		APIKey           string `json:"api_key"`
-		ThinkingType     string `json:"thinking_type"`
-		ReasoningEffort  string `json:"reasoning_effort"`
-		ProfileID        *int64 `json:"profile_id"`         // passed when testing a stored profile: if api_key is empty, its stored key is used
-		Streaming        *bool  `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
-		SessionHeaderKey string `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
-		UserAgent        string `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
+		Provider         string  `json:"provider"`
+		Model            string  `json:"model"`
+		BaseURL          string  `json:"base_url"`
+		Proxy            string  `json:"proxy"`
+		APIKey           string  `json:"api_key"`
+		ThinkingType     string  `json:"thinking_type"`
+		ReasoningEffort  string  `json:"reasoning_effort"`
+		ProfileID        *int64  `json:"profile_id"`         // passed when testing a stored profile: if api_key is empty, its stored key is used
+		Streaming        *bool   `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
+		SessionHeaderKey string  `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
+		UserAgent        string  `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
+		ContextWindowK   *int    `json:"context_window_k"`
+		MaxTokens        *int    `json:"max_tokens"`
+		MaxTokensField   *string `json:"max_tokens_field"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1504,6 +1507,15 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(req.Proxy) == "" {
 			req.Proxy = stored.Proxy
 		}
+		if req.ContextWindowK == nil {
+			req.ContextWindowK = &stored.ContextWindowK
+		}
+		if req.MaxTokens == nil {
+			req.MaxTokens = &stored.MaxTokens
+		}
+		if req.MaxTokensField == nil {
+			req.MaxTokensField = &stored.MaxTokensField
+		}
 		if req.Streaming == nil {
 			st := stored.Streaming
 			req.Streaming = &st
@@ -1516,6 +1528,19 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	if req.ContextWindowK != nil {
+		cfg.ContextWindowK = *req.ContextWindowK
+	}
+	if req.MaxTokens != nil {
+		cfg.MaxTokens = *req.MaxTokens
+	}
+	if req.MaxTokensField != nil {
+		cfg.MaxTokensField = strings.TrimSpace(*req.MaxTokensField)
+	}
+	if cfg.ContextWindowK < 0 || cfg.ContextWindowK > 1000 || cfg.MaxTokens < 0 || (cfg.MaxTokensField != "" && cfg.MaxTokensField != "max_completion_tokens") {
+		writeErr(w, http.StatusBadRequest, "invalid context window, output cap, or max tokens field")
+		return
+	}
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType

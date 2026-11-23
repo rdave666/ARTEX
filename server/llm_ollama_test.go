@@ -52,10 +52,9 @@ func TestOllamaConfigFromKeylessDefaults(t *testing.T) {
 	}
 }
 
-// The provider built from an Ollama config speaks OpenAI Chat Completions on
-// the wire (the SDK appends /chat/completions) with the placeholder Bearer (no
-// real key was configured, no OPENAI_API_KEY env leak).
-func TestOllamaProviderWiresOpenAIProtocol(t *testing.T) {
+// The provider uses native chat so runtime context can be set per request.
+// Keyless profiles must never inherit a cloud credential.
+func TestOllamaProviderWiresNativeProtocol(t *testing.T) {
 	var gotPath, gotAuth, gotModel atomic.Value
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath.Store(r.URL.Path)
@@ -66,7 +65,7 @@ func TestOllamaProviderWiresOpenAIProtocol(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		gotModel.Store(body.Model)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"1","object":"chat.completion","model":"llama3.2","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+		_, _ = w.Write([]byte(`{"model":"llama3.2","message":{"role":"assistant","content":"OK"},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}`))
 	}))
 	t.Cleanup(fake.Close)
 
@@ -85,14 +84,11 @@ func TestOllamaProviderWiresOpenAIProtocol(t *testing.T) {
 	if _, _, _, err = prov.Complete(ctx, req); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	// ConfigFrom normalizes the fake server URL (no /v1) onto the OpenAI root,
-	// so the request must land on /v1/chat/completions. A path of /chat/completions
-	// would mean the base URL leaked through unnormalized (or fell back to OpenAI).
-	if p, _ := gotPath.Load().(string); p != "/v1/chat/completions" {
-		t.Fatalf("path=%q, want /v1/chat/completions", p)
+	if p, _ := gotPath.Load().(string); p != "/api/chat" {
+		t.Fatalf("path=%q, want /api/chat", p)
 	}
-	if a, _ := gotAuth.Load().(string); a != "Bearer ollama" {
-		t.Fatalf("Authorization=%q, want placeholder Bearer ollama", a)
+	if a, _ := gotAuth.Load().(string); a != "" && a != "Bearer ollama" {
+		t.Fatal("unexpected credential sent to keyless Ollama")
 	}
 	if m, _ := gotModel.Load().(string); m != "llama3.2" {
 		t.Fatalf("model on wire=%q", m)
@@ -116,15 +112,26 @@ func TestOllamaKeylessProfileLifecycle(t *testing.T) {
 	cancel()
 	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
 
+	var runtimeOptions atomic.Value
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var wire struct {
+			Options struct {
+				NumCtx     int `json:"num_ctx"`
+				NumPredict int `json:"num_predict"`
+			} `json:"options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
+			t.Error(err)
+		}
+		runtimeOptions.Store([]int{wire.Options.NumCtx, wire.Options.NumPredict})
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"1","object":"chat.completion","model":"llama3.2","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+		_, _ = w.Write([]byte(`{"model":"llama3.2","message":{"role":"assistant","content":"OK"},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}`))
 	}))
 	t.Cleanup(fake.Close)
 
 	pid, err := m.pg.SaveProfile(&db.LLMProfile{
 		Name: "ollama-local", Format: "ollama", Model: "llama3.2",
-		BaseURL: fake.URL, APIKey: "", IsDefault: true,
+		BaseURL: fake.URL, APIKey: "", IsDefault: true, ContextWindowK: 64, MaxTokens: 128,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +182,9 @@ func TestOllamaKeylessProfileLifecycle(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if !resp.OK {
 		t.Fatalf("connection test on keyless ollama failed: %s", resp.Error)
+	}
+	if got, _ := runtimeOptions.Load().([]int); len(got) != 2 || got[0] != 64000 || got[1] != 128 {
+		t.Fatalf("stored profile runtime options=%v, want [64000 128]", got)
 	}
 }
 
@@ -270,5 +280,75 @@ func TestOllamaFromEnvDoesNotInheritOpenAIKey(t *testing.T) {
 	}
 	if c.APIKey != "" {
 		t.Fatalf("ollama inherited a cloud key: %q", c.APIKey)
+	}
+}
+
+// The unsaved form's context/output settings must reach the native request;
+// otherwise the test button validates a different runtime context than chat.
+func TestOllamaConnectionFormContextAndOutputReachWire(t *testing.T) {
+	var got struct {
+		Options struct {
+			NumCtx     int `json:"num_ctx"`
+			NumPredict int `json:"num_predict"`
+		} `json:"options"`
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"OK"},"done":true,"done_reason":"stop"}`))
+	}))
+	defer upstream.Close()
+	body, _ := json.Marshal(map[string]any{"provider": "ollama", "model": "small-model", "base_url": upstream.URL, "streaming": false, "context_window_k": 64, "max_tokens": 128})
+	rec := httptest.NewRecorder()
+	(&Server{}).testLLM(rec, httptest.NewRequest(http.MethodPost, "/api/llm/test", bytes.NewReader(body)))
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &result)
+	if !result.OK {
+		t.Fatalf("connection failed: %s", result.Error)
+	}
+	if got.Options.NumCtx != 64000 || got.Options.NumPredict != 128 {
+		t.Fatalf("runtime options=%+v, want context64000/output128", got.Options)
+	}
+}
+
+func TestLLMConnectionFormPreservesOpenAIOutputField(t *testing.T) {
+	var got map[string]json.RawMessage
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+	body, _ := json.Marshal(map[string]any{"provider": "openai", "model": "small-model", "api_key": "test-only", "base_url": upstream.URL, "streaming": false, "max_tokens": 128, "max_tokens_field": "max_completion_tokens"})
+	rec := httptest.NewRecorder()
+	(&Server{}).testLLM(rec, httptest.NewRequest(http.MethodPost, "/api/llm/test", bytes.NewReader(body)))
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &result)
+	if !result.OK {
+		t.Fatalf("connection failed: %s", rec.Body.String())
+	}
+	if string(got["max_completion_tokens"]) != "128" || len(got["max_tokens"]) != 0 {
+		t.Fatalf("output field mismatch: %+v", got)
+	}
+}
+
+func TestLLMConnectionRejectsInvalidContextAndOutput(t *testing.T) {
+	for _, fields := range []string{`"context_window_k":-1`, `"context_window_k":1001`, `"max_tokens":-1`, `"max_tokens_field":"bogus"`} {
+		t.Run(fields, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			(&Server{}).testLLM(rec, httptest.NewRequest(http.MethodPost, "/api/llm/test", bytes.NewBufferString(`{"provider":"ollama",`+fields+`}`)))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

@@ -327,7 +327,7 @@ function ProfileSheet({
   const [keyHint, setKeyHint] = React.useState("");
   const [rps, setRps] = React.useState("0");
   const [rpm, setRpm] = React.useState("0");
-  const [cw, setCw] = React.useState("0"); // context window (K tokens); 0 = default 200K
+  const [cw, setCw] = React.useState("0"); // context window (K tokens); 0 = provider default
   const [thinkingType, setThinkingType] = React.useState(NONE);
   const [effort, setEffort] = React.useState(NONE);
   const [priority, setPriority] = React.useState("0"); // pool order; higher = tried earlier
@@ -416,6 +416,9 @@ function ProfileSheet({
         streaming,
         sessionHeaderKey.trim(),
         userAgent.trim(),
+        Number(cw) || 0,
+        Number(maxTokens) || 0,
+        toStore(maxTokensField),
       );
       // Show the reply too: only when the model demonstrably spoke is this the same as working inside a session.
       if (r.ok)
@@ -664,13 +667,12 @@ function ProfileSheet({
                 max={1000}
                 value={cw}
                 onChange={(e) => setCw(e.target.value)}
-                placeholder="200"
+                placeholder={format === "ollama" ? "32" : "200"}
               />
             </div>
           </div>
           <p className="-mt-2 text-muted-foreground text-xs">
-            Rate limits of 0 mean unlimited, shared across all agents. The context window is in K (thousand tokens); 0 = the 200K default, capped at 1000 (i.e.
-            1M). Setting it too high keeps compression from ever triggering.
+            Rate limits of 0 mean unlimited, shared across all agents. The context window is in K (thousand tokens); 0 defaults to 32K for Ollama and 200K otherwise, capped at 1000 (1M). For Ollama this also sets the server runtime context via options.num_ctx; choose a size the model and server can support. Setting it too high delays compression and increases memory use.
           </p>
 
           <div className="grid gap-3 rounded-lg border p-3">

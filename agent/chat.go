@@ -120,53 +120,71 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	_ = os.MkdirAll(sessionWorkDir, 0o755)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, sessionWorkDir)
 
-	// Pure assistant: DefaultTools as the base; AugmentTools layers in the key's
-	// visible skills/MCP and lets the DB tools table filter/override. DefaultTools
-	// have no tools-table rows, so they always pass through.
-	base := actool.DefaultTools()
 	ctx = WithRunInfo(ctx, RunInfo{SessionID: sessionID})
-	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
-	defer cleanup()
-
-	system, boundary := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
+	// Model chat is deliberately a small, text-only conversation. In particular,
+	// a nil Tools slice would silently restore the SDK's filesystem/shell tools.
+	modelChat := agentKey == "model_chat"
+	var def DeferredInfo
 	opts := agentcore.Options{
-		Provider:        c.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           withWebFetch(ctx, tools, c.proxyAddr, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
-		// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.
-		EnableWebSearch:       ws.Enabled,
-		WebSearchBackend:      ws.Backend,
-		BraveSearchAPIKey:     ws.BraveKey,
-		TavilySearchAPIKey:    ws.TavilyKey,
-		DeepSeekSearchBaseURL: ws.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
-		DeepSeekSearchModel:   ws.DeepSeekModel,
-		WebSearchProxy:        ws.Proxy,
-		BashEnv:               proxyEnv(c.proxyAddr, c.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
-		WorkingDir:            sessionWorkDir,
-		MaxTurns:              maxTurns,
-		MaxDuration:           maxDuration,
-		Compaction:            compactionConfig(c.window),
-		Todos:                 actool.NewTodoStore(),
-		// large tool output spills to cmd-output/ under the session dir.
-		// the truncation cap uses the SDK default (30000 chars of tool.Capture).
-		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),
-		// hitting the budget (steps) → the SDK runs wrap-up: output a one-line summary. The prompt and
-		// wrap-up rounds are editable in the backend per agent key
-		// (each custom agent gets its own copy; empty/0 uses the generic default: 10 rounds).
-		Settlement:   wrapupSettlement(agentKey, nil),
-		NonStreaming: c.nonStreaming(), // when this profile selects non-streaming, use Provider.Complete
-		MaxTokens:    c.maxTokens(),    // 0 = send no cap, the server's default decides
-
-		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
-		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
+		Provider:               c.prov,
+		SystemPrompt:           []string{"You are a helpful assistant. Answer the user's questions clearly and accurately."},
+		Tools:                  []actool.CoreTool{},
+		DisableBackgroundTasks: true,
+		WorkingDir:             sessionWorkDir,
+		MaxTurns:               maxTurns,
+		MaxDuration:            maxDuration,
+		NonStreaming:           c.nonStreaming(),
+		MaxTokens:              c.maxTokens(),
 	}
-	if c.guard != nil {
+	if !modelChat {
+		// Pure assistant: DefaultTools as the base; AugmentTools layers in the key's
+		// visible skills/MCP and lets the DB tools table filter/override. DefaultTools
+		// have no tools-table rows, so they always pass through.
+		base := actool.DefaultTools()
+		tools, assembled, cleanup := AugmentTools(ctx, agentKey, base)
+		def = assembled
+		defer cleanup()
+
+		system, boundary := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
+		opts = agentcore.Options{
+			Provider:        c.prov,
+			SystemPrompt:    system,
+			DynamicBoundary: boundary,
+			Tools:           withWebFetch(ctx, tools, c.proxyAddr, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+			DeferredTools:   def.Deferred,
+			UnlockSet:       def.Unlock,
+			PermissionMode:  permission.ModeBypass,
+			// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
+			// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.
+			EnableWebSearch:       ws.Enabled,
+			WebSearchBackend:      ws.Backend,
+			BraveSearchAPIKey:     ws.BraveKey,
+			TavilySearchAPIKey:    ws.TavilyKey,
+			DeepSeekSearchBaseURL: ws.DeepSeekBaseURL,
+			DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
+			DeepSeekSearchModel:   ws.DeepSeekModel,
+			WebSearchProxy:        ws.Proxy,
+			BashEnv:               proxyEnv(c.proxyAddr, c.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
+			WorkingDir:            sessionWorkDir,
+			MaxTurns:              maxTurns,
+			MaxDuration:           maxDuration,
+			Compaction:            compactionConfig(c.window),
+			Todos:                 actool.NewTodoStore(),
+			// large tool output spills to cmd-output/ under the session dir.
+			// the truncation cap uses the SDK default (30000 chars of tool.Capture).
+			ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),
+			// hitting the budget (steps) → the SDK runs wrap-up: output a one-line summary. The prompt and
+			// wrap-up rounds are editable in the backend per agent key
+			// (each custom agent gets its own copy; empty/0 uses the generic default: 10 rounds).
+			Settlement:   wrapupSettlement(agentKey, nil),
+			NonStreaming: c.nonStreaming(), // when this profile selects non-streaming, use Provider.Complete
+			MaxTokens:    c.maxTokens(),    // 0 = send no cap, the server's default decides
+
+			// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
+			UntrustedOutputBoundary: untrustedBoundaryEnabled(),
+		}
+	}
+	if !modelChat && c.guard != nil {
 		opts.Hooks = c.guard.Hooks()
 	}
 	// The session id is the provider-side identity (session header, usage metering)
@@ -177,7 +195,9 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		opts.Transcript = c.tx
 	}
 	// experimental feature: when enabled, noa takes over context compression (archive centralized under <workDir>/noa/<SessionID>, persistent).
-	enableNoa(&opts, c.noaEnabledFn, c.workDir, "chat-"+sessionID, noaWarn("chat-"+sessionID))
+	if !modelChat {
+		enableNoa(&opts, c.noaEnabledFn, c.workDir, "chat-"+sessionID, noaWarn("chat-"+sessionID))
+	}
 	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)
 	defer s.Close()
